@@ -29,12 +29,15 @@ fi
 
 cd "${SOLAR_ROOT}"
 
+
+# Step 1: generate pytorch graph, output is pytorch_graph.yaml  
 echo "==> Processing model -> ${GRAPH_OUT}"
 python3 -m solar.cli.process_model \
   --model-file "${MODEL_FILE}" \
   --output-dir "${GRAPH_OUT}" \
   --force-rerun
 
+# Step 2: convert pytorch graph to einsum graph, output is einsum_graph.yaml, ignore the  einsum_graph_renamed.yaml
 echo "==> Converting pytorch graph -> ${EINSUM_OUT}"
 python3 -m solar.cli.toeinsum_model \
   --graph-path "${GRAPH_OUT}/pytorch_graph.yaml" \
@@ -42,9 +45,10 @@ python3 -m solar.cli.toeinsum_model \
   --no-copy-graph \
   --save-graph
 
+# Step 3: convert einsum graph to timeloop graph, output is timeloop_graph.yaml, don't use the einsum_graph_renamed.yaml as input
 echo "==> Converting to Timeloop format -> ${TIMELOOP_OUT}"
 python3 -m solar.cli.totimeloop \
-  --einsum-graph-path "${EINSUM_OUT}/einsum_graph_renamed.yaml" \
+  --einsum-graph-path "${EINSUM_OUT}/einsum_graph.yaml" \
   --output-dir "${TIMELOOP_OUT}"
 
 echo ""
@@ -53,7 +57,7 @@ echo ""
 echo "=== Dense Attention Example Outputs ==="
 echo "PyTorch graph:   ${GRAPH_OUT}/pytorch_graph.yaml"
 echo "Einsum graph:    ${EINSUM_OUT}/einsum_graph.yaml"
-echo "Einsum renamed:  ${EINSUM_OUT}/einsum_graph_renamed.yaml"
+# echo "Einsum renamed:  ${EINSUM_OUT}/einsum_graph_renamed.yaml"
 echo "Graph PDF:       ${EINSUM_OUT}/einsum_graph.pdf"
 echo "Timeloop graph:  ${TIMELOOP_OUT}/timeloop_graph.yaml"
 echo ""

@@ -72,11 +72,6 @@ def main() -> None:
         help="Save a PDF visualization of the einsum graph.",
     )
     parser.add_argument(
-        "--graph-pdf-name",
-        default="einsum_graph.pdf",
-        help="Filename for the graph PDF (default: einsum_graph.pdf).",
-    )
-    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug output.",
@@ -114,13 +109,21 @@ def main() -> None:
     if args.save_graph:
         visualizer = EinsumGraphVisualizer(debug=args.debug)
         renamed_graph_path = output_dir / "einsum_graph_renamed.yaml"
-        pdf_path = output_dir / args.graph_pdf_name
+        pdf_path = output_dir / "einsum_graph_renamed.pdf"
         try:
             visualizer.save_graph_pdf(renamed_graph_path, pdf_path)
             print(f"📊 Graph visualization saved: {pdf_path}")
         except Exception as e:
             print(f"⚠️  Failed to save graph visualization: {e}")
 
+        visualizer = EinsumGraphVisualizer(debug=args.debug)
+        graph_path = output_dir / "einsum_graph.yaml"
+        pdf_path = output_dir / "einsum_graph.pdf"
+        try:
+            visualizer.save_graph_pdf(graph_path, pdf_path)
+            print(f"📊 Graph visualization saved: {pdf_path}")
+        except Exception as e:
+            print(f"⚠️  Failed to save graph visualization: {e}")
     print(f"\n📝 Files saved to {output_dir}:")
     for p in sorted(output_dir.iterdir()):
         if p.is_file():

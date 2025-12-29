@@ -75,18 +75,6 @@ bash run_solar.sh
 #   - output/timeloop/timeloop_graph.yaml       (Stage 3)
 ```
 
-### Benchmark Suite (Kernelbench/Cudacoder)
-
-Process benchmark models:
-
-```bash
-# Process and analyze kernelbench models
-solar-toeinsum --level level1 --kernel-ids 1 2 3
-
-# Process cudacoder models
-solar-toeinsum --cudacoder --level level1 --kernel-ids 100
-```
-
 ## CLI Commands
 
 ### Single Model Processing
@@ -101,7 +89,7 @@ solar-toeinsum-model --graph-path output/graph/pytorch_graph.yaml \
                      --save-graph
 
 # Stage 3: Convert to Timeloop format
-solar-totimeloop --einsum-graph-path output/einsum/einsum_graph_renamed.yaml \
+solar-totimeloop --einsum-graph-path output/einsum/einsum_graph.yaml \
                  --output-dir output/timeloop
 ```
 
