@@ -1,0 +1,15 @@
+# Core dependencies
+torch>=2.0.0
+torchview>=0.2.6
+networkx>=3.0
+pyyaml>=6.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+
+# Optional dependencies for development
+# Install with: pip install -r requirements-dev.txt
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=23.0.0
+# pylint>=2.17.0
+# mypy>=1.0.0
