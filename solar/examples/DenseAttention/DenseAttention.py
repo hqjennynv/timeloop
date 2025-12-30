@@ -6,7 +6,7 @@ This implements standard dense attention which computes the full attention matri
 Shape: (batch_size, num_heads, seq_len, head_dim) for Q, K, V
 Output: (batch_size, num_heads, seq_len, head_dim)
 
-Based on kernelbench/level4/22_attn_core_dense.py
+Implements standard dense attention pattern
 """
 
 import math

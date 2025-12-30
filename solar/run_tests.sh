@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run tests for Solar package with support for kernelbench and cudacoder.
+# Run tests for Solar package.
 #
 # Solar Pipeline Stages:
 #   1. PyTorch graph extraction (pytorch_graph.yaml)
@@ -134,14 +134,6 @@ case $TEST_TYPE in
     integration)
         run_tests "test_integration.py" "Integration Tests"
         ;;
-    kernelbench)
-        echo -e "\n${YELLOW}Testing Kernelbench compatibility...${NC}"
-        python3 -m pytest tests/ -k "kernelbench or Kernelbench" -v
-        ;;
-    cudacoder)
-        echo -e "\n${YELLOW}Testing Cudacoder compatibility...${NC}"
-        python3 -m pytest tests/ -k "cudacoder or Cudacoder" -v
-        ;;
     examples)
         echo -e "${BLUE}Running example scripts...${NC}"
         
@@ -196,10 +188,6 @@ case $TEST_TYPE in
         echo ""
         echo "Component tests:"
         echo "  llm         - LLM agent and node registry"
-        echo ""
-        echo "Benchmark compatibility:"
-        echo "  kernelbench - Test kernelbench models"
-        echo "  cudacoder   - Test cudacoder models"
         echo ""
         echo "Options:"
         echo "  -v, --verbose - Verbose output with detailed test names"

@@ -7,7 +7,7 @@ a structured sparse approximation of full attention.
 Shape: (batch_size, num_heads, seq_len, head_dim) for Q, K, V
 Output: (batch_size, num_heads, seq_len, head_dim)
 
-Based on kernelbench/level4/25_attn_core_blockrandom.py
+Implements block-sparse attention pattern
 """
 
 import math

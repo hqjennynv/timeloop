@@ -115,26 +115,18 @@ def ensure_directory(path: Union[str, Path]) -> Path:
     return path
 
 
-def get_file_prefix(filename: str, is_cudacoder: bool = False) -> str:
+def get_file_prefix(filename: str) -> str:
     """Extract the prefix from a filename.
     
     Args:
-        filename: The filename (e.g., "1_Square_matrix_multiplication_.py" or "100.py").
-        is_cudacoder: Whether this is a cudacoder file.
+        filename: The filename (e.g., "1_Square_matrix_multiplication_.py").
         
     Returns:
-        The prefix (e.g., "1" or "100").
+        The prefix (e.g., "1").
     """
     base_name = Path(filename).stem
-    if is_cudacoder:
-        # For cudacoder, return normalized numeric ID
-        try:
-            return str(int(base_name))
-        except ValueError:
-            return base_name
-    else:
-        # For kernelbench, extract everything before first underscore
-        return base_name.split('_')[0]
+    # Extract everything before first underscore
+    return base_name.split('_')[0]
 
 
 def parse_kernel_ids(kernel_ids: Optional[List[int]], 

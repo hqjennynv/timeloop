@@ -1,7 +1,6 @@
 """PyTorch model processor for extracting and analyzing PyTorch models.
 
-This module processes PyTorch model files (including kernelbench and cudacoder) 
-to extract computation graphs and model information.
+This module processes PyTorch model files to extract computation graphs and model information.
 """
 
 import gc

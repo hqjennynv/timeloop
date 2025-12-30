@@ -1,6 +1,6 @@
 """Standalone BERT-like transformer model for Solar examples.
 
-This file is intentionally self-contained and follows the kernelbench-style API:
+This file is intentionally self-contained and follows the standard Solar model API:
 
 - `class Model(nn.Module)` implements `forward`
 - `get_inputs()` returns a list of inputs for `forward`

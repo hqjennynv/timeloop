@@ -9,7 +9,7 @@ Each position i attends to positions [i - window_size, i + window_size].
 Shape: (batch_size, num_heads, seq_len, head_dim) for Q, K, V
 Output: (batch_size, num_heads, seq_len, head_dim)
 
-Based on kernelbench/level4/23_attn_core_slidingwindows.py
+Implements sliding window attention pattern
 """
 
 import math

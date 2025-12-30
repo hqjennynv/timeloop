@@ -1,7 +1,7 @@
 """Benchmark-oriented einsum conversion.
 
 This module provides `BenchmarkEinsumConverter`, which understands benchmark
-directory layouts (kernelbench/cudacoder) and orchestrates per-model conversion:
+directory layouts and orchestrates per-model conversion:
 
     pytorch_graph.yaml -> einsum_graph.yaml -> einsum_graph_renamed.yaml
 
@@ -21,7 +21,7 @@ from solar.einsum.pytorch_to_einsum import PyTorchToEinsum
 
 
 class BenchmarkEinsumConverter:
-    """Convert benchmark suites (kernelbench/cudacoder) to einsum graphs."""
+    """Convert benchmark suites to einsum graphs."""
 
     def __init__(
         self,
@@ -40,10 +40,9 @@ class BenchmarkEinsumConverter:
 
     def get_output_directories(
         self,
-        base_dir: str = "kernelbench_outputs",
+        base_dir: str = "benchmark_outputs",
         level: Optional[str] = None,
         kernel_ids: Optional[List[int]] = None,
-        is_cudacoder: bool = False,
     ) -> List[Path]:
         """Return benchmark output directories containing `pytorch_graph.yaml`."""
         base_path = Path(base_dir)
@@ -60,10 +59,7 @@ class BenchmarkEinsumConverter:
         valid_dirs: List[Path] = []
 
         for level_dir in level_dirs:
-            if is_cudacoder:
-                kernel_dirs = [d for d in level_dir.iterdir() if d.is_dir()]
-            else:
-                kernel_dirs = [d for d in level_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+            kernel_dirs = [d for d in level_dir.iterdir() if d.is_dir()]
 
             if kernel_id_set is not None:
                 kernel_dirs = [d for d in kernel_dirs if d.name in kernel_id_set]
@@ -97,9 +93,8 @@ class BenchmarkEinsumConverter:
         self,
         level: Optional[str] = None,
         kernel_ids: Optional[List[int]] = None,
-        output_dir: str = "solar_outputs/kernelbench",
-        base_dir: str = "kernelbench_outputs",
-        is_cudacoder: bool = False,
+        output_dir: str = "solar_outputs/benchmark",
+        base_dir: str = "benchmark_outputs",
     ) -> Dict[str, Any]:
         """Convert multiple benchmark directories to einsum graphs."""
         output_base = ensure_directory(output_dir)
@@ -107,7 +102,6 @@ class BenchmarkEinsumConverter:
             base_dir=base_dir,
             level=level,
             kernel_ids=kernel_ids,
-            is_cudacoder=is_cudacoder,
         )
         if not kernel_dirs:
             return {}
@@ -251,17 +245,15 @@ class BenchmarkEinsumConverter:
 
     def print_kernel_status(
         self,
-        base_dir: str = "kernelbench_outputs",
+        base_dir: str = "benchmark_outputs",
         level: Optional[str] = None,
         kernel_ids: Optional[List[int]] = None,
-        is_cudacoder: bool = False,
     ) -> None:
         """Print a lightweight status report for available graphs."""
         kernel_dirs = self.get_output_directories(
             base_dir=base_dir,
             level=level,
             kernel_ids=kernel_ids,
-            is_cudacoder=is_cudacoder,
         )
         if not kernel_dirs:
             print("No model directories found!")
@@ -280,5 +272,4 @@ class BenchmarkEinsumConverter:
                 f"{('✓' if has_analysis else '✗'):<10}"
             )
         print("=" * 100)
-
 

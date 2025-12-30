@@ -236,24 +236,24 @@ class TestIntegration:
         assert total_compute > 0
         assert total_memory > 0
     
-    def test_kernelbench_cudacoder_compatibility(self):
-        """Test analyzer works with both kernelbench and cudacoder models."""
+    def test_naming_convention_compatibility(self):
+        """Test analyzer works with different naming conventions."""
         analyzer = EinsumAnalyzer()
         
-        # Test kernelbench-style operation names
-        kernelbench_ops = [
+        # Test PascalCase operation names
+        pascal_ops = [
             "Conv2d", "Linear", "ReLU", "BatchNorm2d", "MaxPool2d"
         ]
         
-        for op in kernelbench_ops:
+        for op in pascal_ops:
             normalized = analyzer._get_operation_from_name(op)
             assert normalized is not None
         
-        # Test cudacoder-style operation names (often lowercase)
-        cudacoder_ops = [
+        # Test lowercase operation names
+        lower_ops = [
             "conv2d", "linear", "relu", "batch_norm", "max_pool2d"
         ]
         
-        for op in cudacoder_ops:
+        for op in lower_ops:
             normalized = analyzer._get_operation_from_name(op)
             assert normalized is not None

@@ -73,8 +73,8 @@ class TestTorchviewProcessor:
 class TestPyTorchProcessor:
     """Tests for PyTorchProcessor."""
     
-    def test_process_kernelbench_file(self, kernelbench_sample_path, tmp_path):
-        """Test processing a kernelbench file."""
+    def test_process_benchmark_file(self, benchmark_sample_path, tmp_path):
+        """Test processing a benchmark file."""
         config = ProcessingConfig(
             output_dir=str(tmp_path),
             save_graph=False,
@@ -83,8 +83,8 @@ class TestPyTorchProcessor:
         )
         processor = PyTorchProcessor(config)
         
-        output_dir = tmp_path / "single_model_kernelbench"
-        success = processor.process_model_file(str(kernelbench_sample_path), str(output_dir))
+        output_dir = tmp_path / "single_model_benchmark"
+        success = processor.process_model_file(str(benchmark_sample_path), str(output_dir))
         
         # Check success
         assert success is True
@@ -93,8 +93,8 @@ class TestPyTorchProcessor:
         assert output_dir.exists()
         assert (output_dir / "pytorch_graph.yaml").exists()
     
-    def test_process_cudacoder_file(self, cudacoder_sample_path, tmp_path):
-        """Test processing a cudacoder file."""
+    def test_process_simple_model_file(self, simple_model_sample_path, tmp_path):
+        """Test processing a simple model file."""
         config = ProcessingConfig(
             output_dir=str(tmp_path),
             save_graph=False,
@@ -103,8 +103,8 @@ class TestPyTorchProcessor:
         )
         processor = PyTorchProcessor(config)
         
-        output_dir = tmp_path / "single_model_cudacoder"
-        success = processor.process_model_file(str(cudacoder_sample_path), str(output_dir))
+        output_dir = tmp_path / "single_model_simple"
+        success = processor.process_model_file(str(simple_model_sample_path), str(output_dir))
         
         # Check success
         assert success is True
@@ -153,9 +153,10 @@ class TestPyTorchProcessor:
         mock_model = Mock(spec=["named_modules"])
         mock_model.named_modules = Mock(return_value=[("conv_layer", Mock())])
         assert processor._is_rnn_model(mock_model) is False
-    
+
+
 class TestBenchmarkProcessor:
-    """Tests for BenchmarkProcessor (kernelbench/cudacoder conventions)."""
+    """Tests for BenchmarkProcessor."""
 
     def test_filter_by_kernel_ids(self):
         """Test filtering files by kernel IDs."""
@@ -169,27 +170,18 @@ class TestBenchmarkProcessor:
             Path("10_model.py")
         ]
 
-        # Test kernelbench filtering
-        filtered = processor._filter_by_kernel_ids(files, [1, 3], is_cudacoder=False)
+        # Test filtering
+        filtered = processor._filter_by_kernel_ids(files, [1, 3])
         assert len(filtered) == 2
         assert Path("1_model.py") in filtered
         assert Path("3_model.py") in filtered
-
-        # Test cudacoder filtering
-        files = [
-            Path("001.py"),
-            Path("100.py"),
-            Path("200.py")
-        ]
-        filtered = processor._filter_by_kernel_ids(files, [1, 100], is_cudacoder=True)
-        assert len(filtered) == 2
 
 
 class TestIntegration:
     """Integration tests for the full processing pipeline."""
     
-    def test_kernelbench_pipeline(self, kernelbench_sample_path, tmp_path):
-        """Test full kernelbench processing pipeline."""
+    def test_benchmark_pipeline(self, benchmark_sample_path, tmp_path):
+        """Test full benchmark processing pipeline."""
         config = ProcessingConfig(
             output_dir=str(tmp_path),
             save_graph=False,
@@ -200,18 +192,17 @@ class TestIntegration:
         
         # Process directory
         results = processor.process_directory(
-            str(kernelbench_sample_path.parent.parent.parent),
+            str(benchmark_sample_path.parent.parent.parent),
             level="level1",
             kernel_ids=[1],
-            is_cudacoder=False
         )
         
         # Check results
         assert len(results) > 0
         assert all(isinstance(v, bool) for v in results.values())
     
-    def test_cudacoder_pipeline(self, cudacoder_sample_path, tmp_path):
-        """Test full cudacoder processing pipeline."""
+    def test_simple_model_pipeline(self, simple_model_sample_path, tmp_path):
+        """Test full simple model processing pipeline."""
         config = ProcessingConfig(
             output_dir=str(tmp_path),
             save_graph=False,
@@ -222,10 +213,9 @@ class TestIntegration:
         
         # Process directory
         results = processor.process_directory(
-            str(cudacoder_sample_path.parent.parent.parent),
+            str(simple_model_sample_path.parent.parent.parent),
             level="level0",
             kernel_ids=[1],
-            is_cudacoder=True
         )
         
         # Check results

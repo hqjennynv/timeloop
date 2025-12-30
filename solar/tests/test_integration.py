@@ -1,4 +1,4 @@
-"""Integration tests for Solar package with kernelbench and cudacoder."""
+"""Integration tests for Solar package."""
 
 import pytest
 import json
@@ -12,8 +12,8 @@ from solar.einsum import EinsumAnalyzer, PyTorchToEinsum
 from solar.common.types import ProcessingConfig
 
 
-def create_sample_kernelbench_model(path: Path) -> None:
-    """Create a sample kernelbench model file."""
+def create_sample_model(path: Path) -> None:
+    """Create a sample model file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("""
 import torch
@@ -42,8 +42,8 @@ def get_inputs():
 """)
 
 
-def create_sample_cudacoder_model(path: Path) -> None:
-    """Create a sample cudacoder model file."""
+def create_simple_model(path: Path) -> None:
+    """Create a simple linear model file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("""
 import torch
@@ -72,16 +72,16 @@ def get_inputs():
 """)
 
 
-class TestKernelbenchIntegration:
-    """Integration tests for kernelbench models."""
+class TestBenchmarkIntegration:
+    """Integration tests for benchmark models."""
     
-    def test_full_kernelbench_pipeline(self):
-        """Test complete pipeline for kernelbench model."""
+    def test_full_pipeline(self):
+        """Test complete pipeline for benchmark model."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create sample model
-            model_dir = Path(tmpdir) / "kernelbench" / "level1"
+            model_dir = Path(tmpdir) / "benchmark" / "level1"
             model_path = model_dir / "1_test_model.py"
-            create_sample_kernelbench_model(model_path)
+            create_sample_model(model_path)
             
             # Process the model
             output_dir = Path(tmpdir) / "outputs"
@@ -93,10 +93,7 @@ class TestKernelbenchIntegration:
             )
             processor = BenchmarkProcessor(config)
             
-            success = processor.process_file(
-                str(model_path),
-                is_cudacoder=False
-            )
+            success = processor.process_file(str(model_path))
             
             assert success is True
             
@@ -115,14 +112,14 @@ class TestKernelbenchIntegration:
             assert (kernel_output / "einsum_graph.yaml").exists()
             assert (kernel_output / "einsum_graph_renamed.yaml").exists()
     
-    def test_kernelbench_batch_processing(self):
-        """Test processing multiple kernelbench models."""
+    def test_batch_processing(self):
+        """Test processing multiple benchmark models."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create multiple models
-            model_dir = Path(tmpdir) / "kernelbench" / "level1"
+            model_dir = Path(tmpdir) / "benchmark" / "level1"
             for i in range(1, 4):
                 model_path = model_dir / f"{i}_model.py"
-                create_sample_kernelbench_model(model_path)
+                create_sample_model(model_path)
             
             # Process all models
             output_dir = Path(tmpdir) / "outputs"
@@ -138,7 +135,6 @@ class TestKernelbenchIntegration:
                 str(tmpdir),
                 level="level1",
                 kernel_ids=None,  # Process all
-                is_cudacoder=False
             )
             
             # Check all were processed
@@ -151,16 +147,16 @@ class TestKernelbenchIntegration:
                 assert kernel_output.exists()
 
 
-class TestCudacoderIntegration:
-    """Integration tests for cudacoder models."""
+class TestSimpleModelIntegration:
+    """Integration tests for simple models."""
     
-    def test_full_cudacoder_pipeline(self):
-        """Test complete pipeline for cudacoder model."""
+    def test_simple_model_pipeline(self):
+        """Test complete pipeline for simple model."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create sample model
-            model_dir = Path(tmpdir) / "cudacoder" / "level0"
-            model_path = model_dir / "001.py"
-            create_sample_cudacoder_model(model_path)
+            model_dir = Path(tmpdir) / "benchmark" / "level0"
+            model_path = model_dir / "1_simple.py"
+            create_simple_model(model_path)
             
             # Process the model
             output_dir = Path(tmpdir) / "outputs"
@@ -172,10 +168,7 @@ class TestCudacoderIntegration:
             )
             processor = BenchmarkProcessor(config)
             
-            success = processor.process_file(
-                str(model_path),
-                is_cudacoder=True
-            )
+            success = processor.process_file(str(model_path))
             
             assert success is True
             
@@ -194,16 +187,16 @@ class TestCudacoderIntegration:
             assert (kernel_output / "einsum_graph.yaml").exists()
             assert (kernel_output / "einsum_graph_renamed.yaml").exists()
     
-    def test_cudacoder_numeric_ids(self):
-        """Test handling of cudacoder numeric IDs."""
+    def test_numeric_ids(self):
+        """Test handling of numeric IDs."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create models with various numeric IDs
-            model_dir = Path(tmpdir) / "cudacoder" / "level0"
-            test_ids = ["001.py", "010.py", "100.py", "999.py"]
+            model_dir = Path(tmpdir) / "benchmark" / "level0"
+            test_ids = ["1_model.py", "10_model.py", "100_model.py"]
             
             for filename in test_ids:
                 model_path = model_dir / filename
-                create_sample_cudacoder_model(model_path)
+                create_simple_model(model_path)
             
             # Process specific IDs
             output_dir = Path(tmpdir) / "outputs"
@@ -218,8 +211,7 @@ class TestCudacoderIntegration:
             results = processor.process_directory(
                 str(tmpdir),
                 level="level0",
-                kernel_ids=[1, 100],  # Should match 001.py and 100.py
-                is_cudacoder=True
+                kernel_ids=[1, 100],  # Should match 1_model.py and 100_model.py
             )
             
             assert len(results) == 2
@@ -231,17 +223,17 @@ class TestCudacoderIntegration:
 
 
 class TestCrossCompatibility:
-    """Test cross-compatibility between kernelbench and cudacoder."""
+    """Test cross-compatibility between model types."""
     
     def test_mixed_processing(self):
-        """Test processing both kernelbench and cudacoder models."""
+        """Test processing different model types."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create both types of models
-            kb_path = Path(tmpdir) / "kernelbench" / "level1" / "1_model.py"
-            cc_path = Path(tmpdir) / "cudacoder" / "level0" / "001.py"
+            # Create different types of models
+            model1_path = Path(tmpdir) / "benchmark" / "level1" / "1_model.py"
+            model2_path = Path(tmpdir) / "benchmark" / "level0" / "2_simple.py"
             
-            create_sample_kernelbench_model(kb_path)
-            create_sample_cudacoder_model(cc_path)
+            create_sample_model(model1_path)
+            create_simple_model(model2_path)
             
             # Process both
             output_dir = Path(tmpdir) / "outputs"
@@ -253,37 +245,37 @@ class TestCrossCompatibility:
             )
             processor = BenchmarkProcessor(config)
             
-            # Process kernelbench
-            kb_success = processor.process_file(str(kb_path), is_cudacoder=False)
-            assert kb_success is True
+            # Process first model
+            success1 = processor.process_file(str(model1_path))
+            assert success1 is True
             
-            # Process cudacoder
-            cc_success = processor.process_file(str(cc_path), is_cudacoder=True)
-            assert cc_success is True
+            # Process second model
+            success2 = processor.process_file(str(model2_path))
+            assert success2 is True
 
             converter = PyTorchToEinsum(debug=False, enable_agent=False)
 
-            kb_graph = output_dir / "level1" / "1" / "pytorch_graph.yaml"
-            cc_graph = output_dir / "level0" / "1" / "pytorch_graph.yaml"
+            graph1 = output_dir / "level1" / "1" / "pytorch_graph.yaml"
+            graph2 = output_dir / "level0" / "2" / "pytorch_graph.yaml"
 
-            kb_einsum = converter.convert_graph(kb_graph, output_dir / "level1" / "1")
-            cc_einsum = converter.convert_graph(cc_graph, output_dir / "level0" / "1")
-            assert kb_einsum is not None
-            assert cc_einsum is not None
+            einsum1 = converter.convert_graph(graph1, output_dir / "level1" / "1")
+            einsum2 = converter.convert_graph(graph2, output_dir / "level0" / "2")
+            assert einsum1 is not None
+            assert einsum2 is not None
     
     def test_unified_einsum_analysis(self):
-        """Test einsum analyzer works with both naming conventions."""
+        """Test einsum analyzer works with different naming conventions."""
         analyzer = EinsumAnalyzer()
         
-        # Kernelbench-style names
-        kb_names = ["Conv2d", "Linear", "BatchNorm2d", "ReLU"]
-        for name in kb_names:
+        # PascalCase names
+        pascal_names = ["Conv2d", "Linear", "BatchNorm2d", "ReLU"]
+        for name in pascal_names:
             normalized = analyzer._get_operation_from_name(name)
             assert normalized is not None
         
-        # Cudacoder-style names
-        cc_names = ["conv2d", "linear", "batch_norm", "relu"]
-        for name in cc_names:
+        # lowercase names
+        lower_names = ["conv2d", "linear", "batch_norm", "relu"]
+        for name in lower_names:
             normalized = analyzer._get_operation_from_name(name)
             assert normalized is not None
         

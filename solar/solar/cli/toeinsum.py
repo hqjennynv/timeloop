@@ -1,6 +1,6 @@
 """CLI for converting benchmark models to `einsum_graph.yaml`.
 
-This command targets benchmark suites (kernelbench/cudacoder):
+This command targets benchmark suites:
 - Input graph: `pytorch_graph.yaml` (torchview-derived)
 - Output graph: `einsum_graph.yaml`
 """
@@ -23,20 +23,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Kernelbench to einsum conversion and analysis
+  # Benchmark to einsum conversion and analysis
   solar-toeinsum --level level1
   solar-toeinsum --level level1 --kernel-ids 1 2 3
   solar-toeinsum --kernel-ids 19 --debug
   solar-toeinsum --kernel-status --level level1
   
-  # Cudacoder to einsum conversion
-  solar-toeinsum --cudacoder --level level1 --kernel-ids 100
-  solar-toeinsum --cudacoder --list-analyses
-  solar-toeinsum --cudacoder --kernel-status --level level1
-  
   # Architecture configuration
   solar-toeinsum --level level1 --kernel-ids 1 --arch-config A6000
-  solar-toeinsum --cudacoder --level level1 --kernel-ids 100 --arch-config H100_fp32
   
   # Other options
   solar-toeinsum --list-analyses
@@ -56,24 +50,24 @@ Examples:
         help="Specific kernel IDs to analyze"
     )
     repo_root = Path(__file__).resolve().parents[3]
-    default_kernelbench_dir = repo_root / "kernelbench"
-    default_kernelbench_outputs_dir = repo_root / "kernelbench_outputs"
-    default_output_dir = repo_root / "solar_outputs" / "kernelbench"
+    default_benchmark_dir = repo_root / "benchmark"
+    default_benchmark_outputs_dir = repo_root / "benchmark_outputs"
+    default_output_dir = repo_root / "solar_outputs" / "benchmark"
 
     parser.add_argument(
-        "--kernelbench-dir",
-        default=str(default_kernelbench_dir),
-        help="Directory containing kernelbench source files (default: <repo_root>/kernelbench)",
+        "--benchmark-dir",
+        default=str(default_benchmark_dir),
+        help="Directory containing benchmark source files (default: <repo_root>/benchmark)",
     )
     parser.add_argument(
-        "--kernelbench-outputs-dir",
-        default=str(default_kernelbench_outputs_dir),
-        help="Directory containing kernelbench outputs (default: <repo_root>/kernelbench_outputs)",
+        "--benchmark-outputs-dir",
+        default=str(default_benchmark_outputs_dir),
+        help="Directory containing benchmark outputs (default: <repo_root>/benchmark_outputs)",
     )
     parser.add_argument(
         "--output-dir",
         default=str(default_output_dir),
-        help="Output directory for einsum graphs (default: <repo_root>/solar_outputs/kernelbench)",
+        help="Output directory for einsum graphs (default: <repo_root>/solar_outputs/benchmark)",
     )
     parser.add_argument(
         "--debug",
@@ -94,11 +88,6 @@ Examples:
         "--kernel-status",
         action="store_true",
         help="Show status of each kernel"
-    )
-    parser.add_argument(
-        "--cudacoder",
-        action="store_true",
-        help="Analyze cudacoder models instead of kernelbench"
     )
     parser.add_argument(
         "--arch-config",
@@ -122,19 +111,6 @@ Examples:
     
     args = parser.parse_args()
     
-    # Adjust default directories for cudacoder
-    if args.cudacoder:
-        default_cudacoder_dir = repo_root / "cudacoder"
-        default_cudacoder_outputs_dir = repo_root / "cudacoder_outputs"
-        default_cudacoder_output_dir = repo_root / "solar_outputs" / "cudacoder"
-
-        if args.kernelbench_dir == str(default_kernelbench_dir):
-            args.kernelbench_dir = str(default_cudacoder_dir)
-        if args.kernelbench_outputs_dir == str(default_kernelbench_outputs_dir):
-            args.kernelbench_outputs_dir = str(default_cudacoder_outputs_dir)
-        if args.output_dir == str(default_output_dir):
-            args.output_dir = str(default_cudacoder_output_dir)
-    
     # Ensure output directory exists
     output_path = Path(args.output_dir)
     ensure_directory(output_path)
@@ -150,38 +126,34 @@ Examples:
     if args.list_analyses:
         list_available_analyses(
             analyzer,
-            args.kernelbench_outputs_dir,
-            args.cudacoder
+            args.benchmark_outputs_dir,
         )
         return
     
     # Show kernel status if requested
     if args.kernel_status:
         analyzer.print_kernel_status(
-            base_dir=args.kernelbench_outputs_dir,
+            base_dir=args.benchmark_outputs_dir,
             level=args.level,
             kernel_ids=args.kernel_ids,
-            is_cudacoder=args.cudacoder
         )
         return
     
     # Process model graphs if needed
     process_missing_graphs(
-        args.kernelbench_dir,
-        args.kernelbench_outputs_dir,
+        args.benchmark_dir,
+        args.benchmark_outputs_dir,
         args.level,
         args.kernel_ids,
-        args.cudacoder,
         args.force_rerun,
         args.debug
     )
     
     # Get directories to analyze
     kernel_dirs = analyzer.get_output_directories(
-        base_dir=args.kernelbench_outputs_dir,
+        base_dir=args.benchmark_outputs_dir,
         level=args.level,
         kernel_ids=args.kernel_ids,
-        is_cudacoder=args.cudacoder
     )
     
     if not kernel_dirs:
@@ -235,36 +207,33 @@ Examples:
             level=args.level,
             kernel_ids=args.kernel_ids,
             output_dir=args.output_dir,
-            base_dir=args.kernelbench_outputs_dir,
-            is_cudacoder=args.cudacoder
+            base_dir=args.benchmark_outputs_dir,
         )
         
         print(f"\n✅ Completed einsum conversion of {len(results)} kernels")
         print(f"📂 Results saved to: {args.output_dir}")
 
 
-def process_missing_graphs(kernelbench_dir: str,
+def process_missing_graphs(benchmark_dir: str,
                           output_dir: str,
                           level: Optional[str],
                           kernel_ids: Optional[List[int]],
-                          is_cudacoder: bool,
                           force_rerun: bool,
                           debug: bool) -> None:
     """Process missing model graphs using BenchmarkProcessor.
     
     Args:
-        kernelbench_dir: Directory containing source files.
+        benchmark_dir: Directory containing source files.
         output_dir: Directory to save processed graphs.
         level: Kernel level to process.
         kernel_ids: Specific kernel IDs to process.
-        is_cudacoder: Whether processing cudacoder models.
         force_rerun: Force regeneration even if graphs exist.
         debug: Enable debug output.
     """
     # Check which graphs need to be generated
     target_file = "pytorch_graph.yaml"
     base_path = Path(output_dir)
-    source_path = Path(kernelbench_dir)
+    source_path = Path(benchmark_dir)
     
     # Find kernels that need processing
     kernels_to_process = []
@@ -277,19 +246,12 @@ def process_missing_graphs(kernelbench_dir: str,
             
             if force_rerun or not graph_file.exists():
                 # Find source file
-                if is_cudacoder:
-                    source_file = source_path / level / f"{kernel_id:03d}.py"
-                else:
-                    # Find matching source file in kernelbench
-                    source_dir = source_path / level
-                    if source_dir.exists():
-                        for file in source_dir.glob(f"{kernel_id}_*.py"):
-                            source_file = file
-                            break
-                        else:
-                            source_file = None
-                    else:
-                        source_file = None
+                source_dir = source_path / level
+                source_file = None
+                if source_dir.exists():
+                    for file in source_dir.glob(f"{kernel_id}_*.py"):
+                        source_file = file
+                        break
                 
                 if source_file and source_file.exists():
                     kernels_to_process.append((kernel_id, source_file, output_kernel_dir))
@@ -300,15 +262,12 @@ def process_missing_graphs(kernelbench_dir: str,
         level_dir = source_path / level
         if level_dir.exists():
             for source_file in level_dir.glob("*.py"):
-                if is_cudacoder:
-                    kernel_id = int(source_file.stem)
+                # Extract kernel ID from filename like "1_name.py"
+                parts = source_file.stem.split("_", 1)
+                if parts[0].isdigit():
+                    kernel_id = int(parts[0])
                 else:
-                    # Extract kernel ID from filename like "1_name.py"
-                    parts = source_file.stem.split("_", 1)
-                    if parts[0].isdigit():
-                        kernel_id = int(parts[0])
-                    else:
-                        continue
+                    continue
                 
                 output_kernel_dir = base_path / level / str(kernel_id)
                 graph_file = output_kernel_dir / target_file
@@ -339,7 +298,7 @@ def process_missing_graphs(kernelbench_dir: str,
                 print(f"  Processing {kernel_name}...")
             
             try:
-                success = processor.process_file(str(source_file), is_cudacoder=is_cudacoder)
+                success = processor.process_file(str(source_file))
                 
                 if success:
                     successful += 1
@@ -361,14 +320,12 @@ def process_missing_graphs(kernelbench_dir: str,
 
 
 def list_available_analyses(analyzer: BenchmarkEinsumConverter,
-                           base_dir: str,
-                           is_cudacoder: bool) -> None:
+                           base_dir: str) -> None:
     """List all available analyses.
     
     Args:
         analyzer: BenchmarkEinsumConverter instance.
         base_dir: Base directory to scan.
-        is_cudacoder: Whether looking for cudacoder models.
     """
     base_path = Path(base_dir)
     if not base_path.exists():
@@ -389,11 +346,7 @@ def list_available_analyses(analyzer: BenchmarkEinsumConverter,
     
     for level_dir in level_dirs:
         level_name = level_dir.name
-        if is_cudacoder:
-            kernel_dirs = [d for d in level_dir.iterdir() if d.is_dir()]
-        else:
-            kernel_dirs = [d for d in level_dir.iterdir() 
-                          if d.is_dir() and d.name.isdigit()]
+        kernel_dirs = [d for d in level_dir.iterdir() if d.is_dir()]
         
         valid_kernels = []
         for kernel_dir in kernel_dirs:
@@ -407,8 +360,7 @@ def list_available_analyses(analyzer: BenchmarkEinsumConverter,
         print(f"No directories with {target_file} found in {base_dir}")
         return
     
-    model_type = "cudacoder" if is_cudacoder else "kernelbench"
-    print(f"Available {model_type} graphs for torchview graphs (pytorch_graph.yaml):")
+    print(f"Available benchmark graphs for torchview graphs (pytorch_graph.yaml):")
     
     for level, kernels in sorted(by_level.items()):
         kernels.sort(key=lambda x: int(x) if x.isdigit() else float('inf'))

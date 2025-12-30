@@ -322,47 +322,47 @@ class TestDefaultNodeExpansionStrategy:
         assert strategy.should_expand("node3", node_data) is False
 
 
-class TestKernelbenchCudacoderCompatibility:
-    """Test compatibility with kernelbench and cudacoder models."""
+class TestBenchmarkCompatibility:
+    """Test compatibility with benchmark models."""
     
     @patch('solar.einsum.llm_agent.openai')
-    def test_handle_kernelbench_unknown_ops(self, mock_openai, tmp_path):
-        """Test handling unknown ops from kernelbench."""
+    def test_handle_unknown_ops_pascal_case(self, mock_openai, tmp_path):
+        """Test handling unknown ops with PascalCase names."""
         config = AgentConfig(
             api_key="test_key",
             cache_dir=str(tmp_path / "cache")
         )
         agent = NodeTypeConversionAgent(config)
         
-        # Kernelbench-style unknown op
-        kb_node = {
+        # PascalCase unknown op
+        node = {
             "node_type": "CustomKernelOp",
             "input_shapes": [[32, 512]],
             "module_args": {"custom_param": 42}
         }
         
         # Should generate appropriate prompt
-        prompt = agent._create_conversion_prompt("CustomKernelOp", kb_node)
+        prompt = agent._create_conversion_prompt("CustomKernelOp", node)
         assert "CustomKernelOp" in prompt
         assert "custom_param" in prompt
     
     @patch('solar.einsum.llm_agent.openai')
-    def test_handle_cudacoder_unknown_ops(self, mock_openai, tmp_path):
-        """Test handling unknown ops from cudacoder."""
+    def test_handle_unknown_ops_lowercase(self, mock_openai, tmp_path):
+        """Test handling unknown ops with lowercase names."""
         config = AgentConfig(
             api_key="test_key",
             cache_dir=str(tmp_path / "cache")
         )
         agent = NodeTypeConversionAgent(config)
         
-        # Cudacoder-style unknown op (often lowercase)
-        cc_node = {
+        # lowercase unknown op
+        node = {
             "node_type": "custom_kernel",
             "input_shapes": [[1, 256, 256]],
             "weight_shapes": [[3, 3, 256, 128]]
         }
         
         # Should generate appropriate prompt
-        prompt = agent._create_conversion_prompt("custom_kernel", cc_node)
+        prompt = agent._create_conversion_prompt("custom_kernel", node)
         assert "custom_kernel" in prompt
         assert "weight_shapes" in prompt

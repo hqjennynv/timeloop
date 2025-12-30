@@ -11,7 +11,7 @@ from solar.common.types import ProcessingConfig
 def main() -> None:
     """Main entry point for model processing."""
     parser = argparse.ArgumentParser(
-        description="Process kernelbench/cudacoder models"
+        description="Process benchmark models"
     )
     
     parser.add_argument(
@@ -29,11 +29,6 @@ def main() -> None:
         "--output-dir",
         default="outputs",
         help="Output directory"
-    )
-    parser.add_argument(
-        "--cudacoder",
-        action="store_true",
-        help="Process cudacoder models"
     )
     parser.add_argument(
         "--save-graph",
@@ -67,7 +62,6 @@ def main() -> None:
         directory=".",
         level=args.level,
         kernel_ids=args.kernel_ids,
-        is_cudacoder=args.cudacoder
     )
     
     # Print summary

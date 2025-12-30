@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Solar package includes comprehensive tests that validate the einsum conversion pipeline and support both **kernelbench** and **cudacoder** benchmark models. All test outputs use **human-readable YAML** without anchors or aliases.
+The Solar package includes comprehensive tests that validate the einsum conversion pipeline. All test outputs use **human-readable YAML** without anchors or aliases.
 
 ## Solar Pipeline
 
@@ -71,19 +71,6 @@ bash run_tests.sh einsum
 bash run_tests.sh llm
 ```
 
-### Benchmark Compatibility
-
-```bash
-# Test kernelbench models
-bash run_tests.sh kernelbench
-
-# Test cudacoder models
-bash run_tests.sh cudacoder
-
-# Verbose output
-bash run_tests.sh all -v
-```
-
 ### Using Pytest Directly
 
 ```bash
@@ -94,7 +81,6 @@ python3 -m pytest tests/
 python3 -m pytest tests/test_einsum_analyzer.py -v
 
 # Run tests matching pattern
-python3 -m pytest tests/ -k "kernelbench"
 python3 -m pytest tests/ -k "Integration"
 
 # With coverage
@@ -107,7 +93,7 @@ python3 -m pytest tests/ --cov=solar --cov-report=html
 Tests PyTorch graph extraction to `pytorch_graph.yaml`:
 - **TorchviewProcessor**: Core graph extraction using torchview
 - **PyTorchProcessor**: Single-model processing with explicit paths
-- **BenchmarkProcessor**: Batch processing for kernelbench/cudacoder
+- **BenchmarkProcessor**: Batch processing for benchmark models
 - RNN model handling with device fallback (meta → cpu)
 - Parameter extraction (weights, biases, module args)
 
@@ -146,15 +132,14 @@ Tests dynamic operation handler generation:
 - `test_handler_caching`: Cache persistence
 
 ### 4. Integration Tests
-End-to-end tests with benchmark suites:
-- **Kernelbench pipeline**: Full directory processing
-- **Cudacoder pipeline**: Numeric ID handling
+End-to-end tests with benchmark models:
+- **Benchmark pipeline**: Full directory processing
 - **Batch processing**: Multiple kernels at once
 - **Cross-compatibility**: Mixed naming conventions
 
 **Key Tests:**
-- `test_full_kernelbench_pipeline`: Kernelbench end-to-end
-- `test_full_cudacoder_pipeline`: Cudacoder end-to-end
+- `test_full_pipeline`: End-to-end processing
+- `test_batch_processing`: Multiple model processing
 - `test_mixed_processing`: Cross-compatibility validation
 
 ### 5. Example Tests
@@ -168,23 +153,17 @@ Tests that all example scripts run successfully:
 
 ## Model Compatibility
 
-### Kernelbench Models
+### Benchmark Models
 - **File Format**: `{kernel_id}_{name}.py` (e.g., `1_ResNet50.py`)
-- **Directory Structure**: `kernelbench/level{N}/`
-- **Output Structure**: `kernelbench_outputs/level{N}/{kernel_id}/`
-- **Node Types**: PascalCase (e.g., `Conv2d`, `Linear`, `ReLU`)
-
-### Cudacoder Models
-- **File Format**: `{numeric_id}.py` (e.g., `001.py`, `100.py`)
-- **Directory Structure**: `cudacoder/level{N}/`
-- **Output Structure**: `cudacoder_outputs/level{N}/{kernel_id}/`
-- **Node Types**: lowercase (e.g., `conv2d`, `linear`, `relu`)
+- **Directory Structure**: `benchmark/level{N}/`
+- **Output Structure**: `benchmark_outputs/level{N}/{kernel_id}/`
+- **Node Types**: Both PascalCase (e.g., `Conv2d`, `Linear`) and lowercase (e.g., `conv2d`, `linear`)
 
 ### Compatibility Features
 - Automatic name normalization (PascalCase ↔ lowercase)
 - Flexible ID parsing (numeric and string)
 - Mixed naming convention support
-- Unified conversion pipeline for both benchmark types
+- Unified conversion pipeline
 
 ### Output Files
 
@@ -206,7 +185,7 @@ All YAML files use **NoAliasDumper** for human readability (no `&id001` referenc
 Tests create sample models dynamically following benchmark conventions:
 
 ```python
-# Kernelbench/Cudacoder-style model
+# Standard model format
 class Model(nn.Module):
     def __init__(self):
         super().__init__()
@@ -227,8 +206,8 @@ def get_inputs():
 Common fixtures are defined in `conftest.py`:
 - `sample_node_data`: Sample node information
 - `sample_torchview_nodes`: Sample graph nodes
-- `kernelbench_sample_path`: Path to test kernelbench model
-- `cudacoder_sample_path`: Path to test cudacoder model
+- `benchmark_sample_path`: Path to test benchmark model
+- `simple_model_sample_path`: Path to test simple model
 - `tmp_path`: Pytest's built-in temporary directory
 
 ### Expected Output Formats
@@ -359,16 +338,8 @@ class TestNewFeature:
             assert "&id" not in content
             assert "*id" not in content
     
-    def test_kernelbench_support(self):
-        """Test feature with kernelbench models (PascalCase)."""
-        # Test implementation
-        
-    def test_cudacoder_support(self):
-        """Test feature with cudacoder models (lowercase)."""
-        # Test implementation
-        
-    def test_cross_compatibility(self):
-        """Test feature works with both model types."""
+    def test_naming_convention_support(self):
+        """Test feature works with different naming conventions."""
         # Test implementation
 ```
 
@@ -376,7 +347,7 @@ class TestNewFeature:
 
 1. **Test all pipeline stages** when adding new operations
 2. **Verify YAML format**: No anchors/aliases (`&id001`, `*id001`)
-3. **Test both model types** (kernelbench PascalCase + cudacoder lowercase)
+3. **Test different naming conventions** (PascalCase + lowercase)
 4. **Use fixtures** for common test data and temporary directories
 5. **Mock external dependencies** (e.g., LLM API calls) for unit tests
 6. **Include integration tests** for end-to-end validation

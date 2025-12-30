@@ -8,7 +8,6 @@ Solar is a toolkit for extracting PyTorch model graphs and converting them to ei
 - **Einsum Conversion**: Convert PyTorch operations to einsum notation with automatic rank renaming
 - **Graph Visualization**: Generate PDF visualizations of einsum graphs
 - **Timeloop Export**: Convert to Timeloop workload format for architectural exploration
-- **Benchmark Support**: Native support for kernelbench and cudacoder benchmark suites
 - **Human-Readable YAML**: All outputs use clean YAML without anchors/aliases
 
 ## Installation
@@ -51,14 +50,14 @@ Solar includes several example models demonstrating different attention patterns
 
 ### Available Examples
 
-| Example | Description | Based On |
-|---------|-------------|----------|
-| `Attention/` | Multi-head self-attention | Standard Transformer |
-| `BERT/` | BERT-like encoder model | BERT architecture |
-| `DenseAttention/` | Full attention matrix | kernelbench level4/22 |
-| `SlidingWindowAttention/` | Local window attention | kernelbench level4/23 |
-| `RandomAttention/` | Random sparse attention | kernelbench level4/24 |
-| `BlockSparseAttention/` | Block-sparse attention | kernelbench level4/25 |
+| Example | Description |
+|---------|-------------|
+| `Attention/` | Multi-head self-attention |
+| `BERT/` | BERT-like encoder model |
+| `DenseAttention/` | Full attention matrix |
+| `SlidingWindowAttention/` | Local window attention |
+| `RandomAttention/` | Random sparse attention |
+| `BlockSparseAttention/` | Block-sparse attention |
 
 ### Running an Example
 
@@ -137,10 +136,6 @@ bash run_tests.sh integration # Integration tests
 # Test examples
 bash run_tests.sh examples   # Run all example scripts
 
-# Test benchmark compatibility
-bash run_tests.sh kernelbench
-bash run_tests.sh cudacoder
-
 # Verbose output
 bash run_tests.sh all -v
 ```
@@ -218,7 +213,6 @@ solar/
 - **EinsumToTimeloop**: Export to Timeloop workload format
 - **Node Registry**: Extensible registry for operation handlers
 - **LLM Agent** (optional): Dynamic handler generation for unknown operations
-- **Benchmark Processors**: Specialized handling for kernelbench/cudacoder file structures
 
 ## Contributing
 

@@ -150,6 +150,5 @@ ANALYSIS_OUTPUT_FILES = {
 
 # Kernel directory patterns
 KERNEL_DIR_PATTERNS = {
-    "kernelbench": r"^\d+$",  # Simple numeric: 1, 2, 3
-    "cudacoder": r"^\d{3}$",  # Three digits: 100, 101, 102
+    "benchmark": r"^\d+$",  # Simple numeric: 1, 2, 3
 }

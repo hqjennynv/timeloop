@@ -56,10 +56,10 @@ def sample_torchview_nodes() -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
-def kernelbench_sample_path(tmp_path_factory) -> Path:
-    """Path to a sample kernelbench model file."""
+def benchmark_sample_path(tmp_path_factory) -> Path:
+    """Path to a sample benchmark model file."""
     base_dir = tmp_path_factory.mktemp("solar_test_data")
-    sample_file = base_dir / "kernelbench" / "level1" / "1_simple_model.py"
+    sample_file = base_dir / "benchmark" / "level1" / "1_simple_model.py"
     sample_file.parent.mkdir(parents=True, exist_ok=True)
     sample_file.write_text("""
 import torch
@@ -81,10 +81,10 @@ def get_inputs():
 
 
 @pytest.fixture
-def cudacoder_sample_path(tmp_path_factory) -> Path:
-    """Path to a sample cudacoder model file."""
+def simple_model_sample_path(tmp_path_factory) -> Path:
+    """Path to a sample simple model file."""
     base_dir = tmp_path_factory.mktemp("solar_test_data")
-    sample_file = base_dir / "cudacoder" / "level0" / "001.py"
+    sample_file = base_dir / "benchmark" / "level0" / "1_simple.py"
     sample_file.parent.mkdir(parents=True, exist_ok=True)
     sample_file.write_text("""
 import torch

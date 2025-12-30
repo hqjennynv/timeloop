@@ -7,7 +7,7 @@ of full attention.
 Shape: (batch_size, num_heads, seq_len, head_dim) for Q, K, V
 Output: (batch_size, num_heads, seq_len, head_dim)
 
-Based on kernelbench/level4/24_attn_core_random.py
+Implements random sparse attention pattern
 """
 
 import math

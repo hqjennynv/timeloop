@@ -1,7 +1,7 @@
 """Standalone Multi-Head Attention model for Solar examples.
 
 This file demonstrates the attention mechanism that is the core of transformers.
-It follows the kernelbench-style API:
+It follows the standard Solar model API:
 
 - `class Model(nn.Module)` implements `forward`
 - `get_inputs()` returns a list of inputs for `forward`

@@ -2,7 +2,7 @@
 
 This module provides `BenchmarkProcessor`, a thin wrapper around
 `solar.graph.pytorch_processor.PyTorchProcessor` that understands benchmark-style
-directory hierarchies (kernelbench/cudacoder).
+directory hierarchies.
 
 Responsibilities:
 - Map a benchmark model file path to an output directory (e.g. `level1/55/`)
@@ -27,7 +27,7 @@ from solar.graph.pytorch_processor import PyTorchProcessor
 
 
 class BenchmarkProcessor:
-    """Process benchmark model suites (kernelbench/cudacoder)."""
+    """Process benchmark model suites."""
 
     def __init__(self, config: Optional[ProcessingConfig] = None) -> None:
         """Initialize the benchmark processor.
@@ -44,12 +44,11 @@ class BenchmarkProcessor:
         if self.config.safe_mode:
             setup_safe_environment()
 
-    def process_file(self, file_path: str, is_cudacoder: bool = False) -> bool:
+    def process_file(self, file_path: str) -> bool:
         """Process a single benchmark model file.
 
         Args:
             file_path: Path to the Python model file.
-            is_cudacoder: Whether this is a cudacoder file.
 
         Returns:
             True if successful, False otherwise.
@@ -58,7 +57,7 @@ class BenchmarkProcessor:
             if self.config.debug:
                 print(f"Processing {file_path}...")
 
-            output_dir = self._prepare_output_directory(file_path, is_cudacoder)
+            output_dir = self._prepare_output_directory(file_path)
             return self.model_processor.process_model_file(file_path, str(output_dir))
         except Exception as e:
             print(f"✗ Error processing {file_path}: {e}")
@@ -73,20 +72,18 @@ class BenchmarkProcessor:
         directory: str,
         level: str = "level1",
         kernel_ids: Optional[List[int]] = None,
-        is_cudacoder: bool = False,
     ) -> Dict[str, bool]:
         """Process all benchmark model files in a given level directory.
 
         Args:
-            directory: Repo root directory (contains `kernelbench/` and/or `cudacoder/`).
+            directory: Repo root directory (contains `benchmark/`).
             level: Benchmark level to process (e.g. "level1").
             kernel_ids: Optional list of specific kernel IDs to process.
-            is_cudacoder: Whether processing cudacoder models.
 
         Returns:
             Dictionary mapping file paths to success status.
         """
-        base_dir = "cudacoder" if is_cudacoder else "kernelbench"
+        base_dir = "benchmark"
         target_dir = Path(directory) / base_dir / level
 
         if not target_dir.exists():
@@ -95,7 +92,7 @@ class BenchmarkProcessor:
 
         python_files = list(target_dir.glob("*.py"))
         if kernel_ids:
-            python_files = self._filter_by_kernel_ids(python_files, kernel_ids, is_cudacoder)
+            python_files = self._filter_by_kernel_ids(python_files, kernel_ids)
 
         results: Dict[str, bool] = {}
         total = len(python_files)
@@ -103,9 +100,9 @@ class BenchmarkProcessor:
         for i, file_path in enumerate(python_files, 1):
             print(f"\n[{i}/{total}] Processing {file_path.name}...")
             if self.config.safe_mode:
-                success = self._process_file_subprocess(str(file_path), is_cudacoder)
+                success = self._process_file_subprocess(str(file_path))
             else:
-                success = self.process_file(str(file_path), is_cudacoder=is_cudacoder)
+                success = self.process_file(str(file_path))
             results[str(file_path)] = success
 
         successful = sum(results.values())
@@ -115,7 +112,7 @@ class BenchmarkProcessor:
         print(f"  ❌ Failed: {failed}")
         return results
 
-    def _prepare_output_directory(self, file_path: str, is_cudacoder: bool) -> Path:
+    def _prepare_output_directory(self, file_path: str) -> Path:
         """Prepare output directory for a benchmark model file.
 
         Output layout:
@@ -123,13 +120,12 @@ class BenchmarkProcessor:
 
         Args:
             file_path: Path to the model file.
-            is_cudacoder: Whether this is a cudacoder file.
 
         Returns:
             Path to the output directory.
         """
         file_path_obj = Path(file_path)
-        prefix = get_file_prefix(file_path_obj.name, is_cudacoder)
+        prefix = get_file_prefix(file_path_obj.name)
         level = file_path_obj.parent.name
 
         output_dir = Path(self.config.output_dir) / level / prefix
@@ -145,18 +141,18 @@ class BenchmarkProcessor:
         return output_dir
 
     def _filter_by_kernel_ids(
-        self, files: List[Path], kernel_ids: List[int], is_cudacoder: bool
+        self, files: List[Path], kernel_ids: List[int]
     ) -> List[Path]:
         """Filter benchmark files by kernel IDs."""
         kernel_ids_str = {str(kid) for kid in kernel_ids}
         filtered: List[Path] = []
         for file_path in files:
-            prefix = get_file_prefix(file_path.name, is_cudacoder)
+            prefix = get_file_prefix(file_path.name)
             if prefix in kernel_ids_str:
                 filtered.append(file_path)
         return filtered
 
-    def _process_file_subprocess(self, file_path: str, is_cudacoder: bool) -> bool:
+    def _process_file_subprocess(self, file_path: str) -> bool:
         """Process a benchmark file in a subprocess for safety."""
         cmd = [
             sys.executable,
@@ -179,7 +175,7 @@ config = ProcessingConfig(
     safe_mode=False,
 )
 processor = BenchmarkProcessor(config)
-success = processor.process_file('{file_path}', is_cudacoder={is_cudacoder})
+success = processor.process_file('{file_path}')
 sys.exit(0 if success else 1)
 """,
         ]
@@ -213,5 +209,4 @@ sys.exit(0 if success else 1)
         except Exception as e:
             print(f"Subprocess error: {e}")
             return False
-
 
