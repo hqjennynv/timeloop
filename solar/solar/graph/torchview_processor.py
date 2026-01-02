@@ -423,7 +423,14 @@ class TorchviewProcessor:
         node_name = getattr(node, 'name', '').lower()
         module_info['module_args']['function_name'] = node_name
         
-        # Extract from args attribute
+        # Extract from torchview 'attributes' field (contains stringified args/kwargs)
+        # This is populated when collect_attributes=True in draw_graph()
+        if hasattr(node, 'attributes') and node.attributes:
+            parsed_args = self._parse_torchview_attributes(node.attributes, node_name)
+            if parsed_args:
+                module_info['module_args'].update(parsed_args)
+        
+        # Extract from args attribute (fallback)
         if hasattr(node, 'args') and node.args:
             for i, arg in enumerate(node.args):
                 if hasattr(arg, 'shape') and hasattr(arg, 'numel'):
@@ -442,6 +449,148 @@ class TorchviewProcessor:
                     module_info['weight_shapes'].append(list(value.shape))
                 else:
                     module_info['module_args'][key] = value
+    
+    def _parse_torchview_attributes(
+        self,
+        attributes: str,
+        node_name: str,
+    ) -> Dict[str, Any]:
+        """Parse torchview stringified attributes to extract function arguments.
+        
+        torchview's stringify_attributes() produces strings like:
+        - For functions: "[[Tensor(shape=(2, 32, 64), dtype=torch.float32), 1, 2], {}]"
+        - This represents [args_list, kwargs_dict]
+        
+        We parse this by replacing Tensor(...) with a placeholder and using eval.
+        
+        Args:
+            attributes: Stringified attributes from torchview.
+            node_name: Name of the function (e.g., 'transpose', 'permute').
+            
+        Returns:
+            Dictionary of parsed arguments.
+        """
+        result: Dict[str, Any] = {}
+        
+        if not attributes:
+            return result
+        
+        # Store raw attributes for debugging
+        result['raw_attributes'] = attributes
+        
+        try:
+            # Parse the attributes string by replacing Tensor(...) with a placeholder
+            args_list, kwargs_dict = self._eval_attributes_string(attributes)
+            
+            if args_list is None:
+                return result
+            
+            # Extract non-tensor arguments (skip index 0 which is usually the input tensor)
+            non_tensor_args = [arg for arg in args_list if not isinstance(arg, dict) or 'tensor_placeholder' not in arg]
+            # Filter out tensor placeholders
+            scalar_args = [arg for arg in non_tensor_args if not (isinstance(arg, dict) and 'tensor_placeholder' in arg)]
+            
+            if node_name == 'transpose':
+                # transpose(input, dim0, dim1) - extract dim0 and dim1
+                int_args = [arg for arg in scalar_args if isinstance(arg, int)]
+                if len(int_args) >= 2:
+                    result['dim0'] = int_args[0]
+                    result['dim1'] = int_args[1]
+                    result['transpose_dims'] = [int_args[0], int_args[1]]
+                # Also check kwargs
+                if kwargs_dict:
+                    if 'dim0' in kwargs_dict:
+                        result['dim0'] = kwargs_dict['dim0']
+                    if 'dim1' in kwargs_dict:
+                        result['dim1'] = kwargs_dict['dim1']
+                    if 'dim0' in result and 'dim1' in result:
+                        result['transpose_dims'] = [result['dim0'], result['dim1']]
+                    
+            elif node_name == 'permute':
+                # permute(input, dims) or permute(input, *dims)
+                int_args = [arg for arg in scalar_args if isinstance(arg, int)]
+                if int_args:
+                    result['permute_dims'] = int_args
+                # Check for tuple/list arg
+                for arg in scalar_args:
+                    if isinstance(arg, (list, tuple)) and all(isinstance(d, int) for d in arg):
+                        result['permute_dims'] = list(arg)
+                        break
+                # Check kwargs
+                if kwargs_dict and 'dims' in kwargs_dict:
+                    result['permute_dims'] = list(kwargs_dict['dims'])
+                            
+            elif node_name == 't':
+                # t() is always transpose(0, 1) for 2D tensors
+                result['dim0'] = 0
+                result['dim1'] = 1
+                result['transpose_dims'] = [1, 0]
+                
+            elif node_name in ('view', 'reshape'):
+                # view(input, *sizes) or reshape(input, shape)
+                int_args = [arg for arg in scalar_args if isinstance(arg, int)]
+                if int_args:
+                    result['target_shape'] = int_args
+                # Check for tuple/list arg
+                for arg in scalar_args:
+                    if isinstance(arg, (list, tuple)) and all(isinstance(d, int) for d in arg):
+                        result['target_shape'] = list(arg)
+                        break
+                        
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Failed to parse attributes for {node_name}: {e}")
+        
+        return result
+    
+    def _eval_attributes_string(
+        self,
+        attributes: str,
+    ) -> Tuple[Optional[List[Any]], Optional[Dict[str, Any]]]:
+        """Safely evaluate torchview attributes string.
+        
+        Replaces Tensor(...) with a placeholder dict and evaluates the string.
+        
+        Args:
+            attributes: Stringified attributes from torchview.
+            
+        Returns:
+            Tuple of (args_list, kwargs_dict) or (None, None) on failure.
+        """
+        import re
+        
+        try:
+            # Replace Tensor(shape=(...), dtype=...) with a placeholder dict
+            # Pattern matches: Tensor(shape=(1, 2, 3), dtype=torch.float32)
+            def replace_tensor(match: re.Match) -> str:
+                return "{'tensor_placeholder': True}"
+            
+            # Replace all Tensor(...) occurrences
+            # Handle nested parentheses by matching Tensor( then everything until matching )
+            processed = attributes
+            
+            # Simple approach: replace Tensor(...) patterns
+            # This regex handles nested parens by being greedy within the Tensor() call
+            tensor_pattern = r'Tensor\([^)]*(?:\([^)]*\)[^)]*)*\)'
+            processed = re.sub(tensor_pattern, "{'tensor_placeholder': True}", processed)
+            
+            # Replace torch.dtype references
+            processed = re.sub(r'torch\.\w+', 'None', processed)
+            
+            # Now safely evaluate
+            parsed = eval(processed, {"__builtins__": {}}, {})
+            
+            if isinstance(parsed, (list, tuple)) and len(parsed) >= 2:
+                args_list = parsed[0] if isinstance(parsed[0], (list, tuple)) else []
+                kwargs_dict = parsed[1] if isinstance(parsed[1], dict) else {}
+                return list(args_list), kwargs_dict
+            
+            return None, None
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Failed to eval attributes: {e}")
+            return None, None
     
     def _infer_parameter_name(self,
                              op_name: str,

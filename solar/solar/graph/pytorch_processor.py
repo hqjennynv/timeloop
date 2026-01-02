@@ -1,6 +1,7 @@
 """PyTorch model processor for extracting and analyzing PyTorch models.
 
-This module processes PyTorch model files to extract computation graphs and model information.
+This module processes PyTorch model files (including kernelbench and cudacoder) 
+to extract computation graphs and model information.
 """
 
 import gc
@@ -75,8 +76,8 @@ class PyTorchProcessor:
             if model is None:
                 return False
             
-            # Generate torchview graph
-            graph = self._generate_torchview_graph(model, inputs)
+            # Generate torchview graph (pass output_path for saving visualization)
+            graph = self._generate_torchview_graph(model, inputs, str(output_path))
             if graph is None:
                 return False
             
@@ -152,14 +153,18 @@ class PyTorchProcessor:
             print(f"Error loading model from {file_path}: {e}")
             return None, None
     
-    def _generate_torchview_graph(self,
-                                 model: nn.Module,
-                                 inputs: Any) -> Optional[Any]:
+    def _generate_torchview_graph(
+        self,
+        model: nn.Module,
+        inputs: Any,
+        output_dir: Optional[str] = None,
+    ) -> Optional[Any]:
         """Generate a torchview computation graph.
         
         Args:
             model: PyTorch model.
             inputs: Model inputs.
+            output_dir: Directory to save graph visualization (if save_graph enabled).
             
         Returns:
             Computation graph or None if failed.
@@ -176,22 +181,27 @@ class PyTorchProcessor:
                 if device == "meta" and self._is_rnn_model(model):
                     continue
                 
-                # Generate graph
+                # Generate graph (don't let torchview save - we'll do it ourselves)
                 graph = torchview.draw_graph(
                     model,
                     input_data=inputs,
                     device=device,
-                    save_graph=self.config.save_graph,
+                    save_graph=False,  # We handle saving separately
                     expand_nested=True,
                     depth=float('inf'),
                     hide_module_functions=False,
                     hide_inner_tensors=False,
                     roll=False,
-                    strict=False
+                    strict=False,
+                    collect_attributes=True,  # Capture function/module args
                 )
                 
                 if self.config.debug:
                     print(f"✅ Generated graph using {device} device")
+                
+                # Save graph visualization if requested
+                if self.config.save_graph and output_dir:
+                    self._save_torchview_graph(graph, output_dir)
                 
                 return graph
                 
@@ -208,6 +218,34 @@ class PyTorchProcessor:
                 raise
         
         return None
+
+    def _save_torchview_graph(self, graph: Any, output_dir: str) -> None:
+        """Save torchview graph visualization to the output directory.
+        
+        Args:
+            graph: Torchview graph object.
+            output_dir: Directory to save the graph visualization.
+        """
+        try:
+            output_path = Path(output_dir)
+            graph_filename = output_path / "torchview_graph"
+            
+            # torchview's visual_graph is a graphviz.Digraph object
+            if hasattr(graph, 'visual_graph'):
+                # Render to PDF (default) and PNG
+                graph.visual_graph.render(
+                    filename=str(graph_filename),
+                    format='pdf',
+                    cleanup=True,  # Remove the intermediate .gv file
+                )
+                if self.config.debug:
+                    print(f"📊 Saved torchview graph: {graph_filename}.pdf")
+            else:
+                if self.config.debug:
+                    print("⚠️ Graph object does not have visual_graph attribute")
+        except Exception as e:
+            if self.config.debug:
+                print(f"⚠️ Failed to save torchview graph: {e}")
     
     def _is_rnn_model(self, model: nn.Module) -> bool:
         """Check if a model is RNN-like.

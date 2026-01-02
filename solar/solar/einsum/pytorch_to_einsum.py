@@ -557,6 +557,9 @@ class PyTorchToEinsum:
 
         shapes = self._extract_operand_shapes(node_data)
         
+        # Get module_args for operations like transpose/permute
+        module_args = node_data.get("module_args", {})
+        
         # Try to get einsum representation
         equation = ""
         elementwise_op = "mul"
@@ -565,7 +568,10 @@ class PyTorchToEinsum:
         is_einsum_supportable = True
         
         try:
-            einsum_op = self._einsum_analyzer.get_einsum_op(node_type, shapes)
+            # Pass module_args to the analyzer for transpose/permute operations
+            einsum_op = self._einsum_analyzer.get_einsum_op(
+                node_type, shapes, module_args=module_args
+            )
             equation = einsum_op.equation
             elementwise_op = einsum_op.elementwise_op
             reduction_op = einsum_op.reduction_op
