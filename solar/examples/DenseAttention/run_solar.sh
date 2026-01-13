@@ -30,14 +30,14 @@ fi
 cd "${SOLAR_ROOT}"
 
 
-# Step 1: generate pytorch graph, output is pytorch_graph.yaml  
+# Step 1: generate pytorch graph, output is pytorch_graph.yaml
 echo "==> Processing model -> ${GRAPH_OUT}"
 python3 -m solar.cli.process_model \
   --model-file "${MODEL_FILE}" \
   --output-dir "${GRAPH_OUT}" \
   --force-rerun
 
-# Step 2: convert pytorch graph to einsum graph, output is einsum_graph.yaml, ignore the  einsum_graph_renamed.yaml
+# Step 2: convert pytorch graph to einsum graph, output is einsum_graph.yaml, ignore the einsum_graph_renamed.yaml
 echo "==> Converting pytorch graph -> ${EINSUM_OUT}"
 python3 -m solar.cli.toeinsum_model \
   --graph-path "${GRAPH_OUT}/pytorch_graph.yaml" \

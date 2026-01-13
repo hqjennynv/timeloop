@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import networkx as nx
 import yaml
+from collections import deque
 
 from solar.common.utils import ensure_directory, NoAliasDumper
 from solar.einsum.analyzer import EinsumAnalyzer
@@ -234,6 +235,8 @@ class PyTorchToEinsum:
         einsum_graph = self._build_einsum_graph(
             pytorch_graph, op_graph, start_nodes_info
         )
+
+        ffn_graph = self._build_ffn_graph(einsum_graph)
 
         # Write einsum_graph.yaml
         out_path = out_dir / "einsum_graph.yaml"
@@ -577,8 +580,18 @@ class PyTorchToEinsum:
             reduction_op = einsum_op.reduction_op
             is_real_einsum = einsum_op.is_real_einsum
             is_einsum_supportable = einsum_op.is_einsum_supportable
+            operands = [
+                {
+                    "name": operand.name,
+                    "dims": operand.dims,
+                    "is_output": operand.is_output,
+                } for operand in einsum_op.operands
+            ]
+
         except Exception:
             equation = ""
+            operands = []
+            assert False, f"Failed to get einsum for node {node_id} of type {node_type}"
             is_einsum_supportable = self._is_operation_supportable(node_type)
             
             # Set default ops based on node type
@@ -618,6 +631,7 @@ class PyTorchToEinsum:
             "is_real_einsum": is_real_einsum,
             "is_einsum_supportable": is_einsum_supportable,
             "shapes": shapes,
+            "operands": operands,
             "connections": {
                 "inputs": input_connections,
                 "outputs": sorted(list(op_graph.successors(node_id))),
@@ -706,6 +720,44 @@ class PyTorchToEinsum:
         
         # Default: supportable unless explicitly unsupportable
         return op not in _UNSUPPORTABLE_OPS
+
+    def _build_ffn_graph(
+        self,
+        einsum_graph: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Parse with topological order to build Fast Fusion graph."""
+
+        # Construct indegree map and a queue of zero-indegree nodes
+        queue = deque()
+        indegree = {}
+        for node_name, node in einsum_graph["layers"].items():
+            if len(node["connections"]["inputs"]) == 0:
+                queue.append(node_name)
+            else:
+                indegree[node_name] = len(node["connections"]["inputs"])
+
+        # Topological traversal
+        while queue:
+            current_node_name = queue.popleft()
+            current_node = einsum_graph["layers"][current_node_name]
+
+            # Process current node (placeholder for actual FFN logic)
+            from pprint import pprint
+            print(f"Processing node: {current_node_name}")
+            print(f"    einsum_equation: {current_node['einsum_equation']}")
+            if "operands" in current_node:
+                print(f"    operands: {current_node['operands']}")
+
+            # Decrease indegree of neighbors and add to queue if zero
+            for neighbor in current_node["connections"]["outputs"]:
+                if neighbor in indegree:
+                    indegree[neighbor] -= 1
+                    if indegree[neighbor] == 0:
+                        queue.append(neighbor)
+
+
+        return einsum_graph
+
 
 
 # Backward compatibility alias
