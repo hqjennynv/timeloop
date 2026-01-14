@@ -38,7 +38,7 @@ from collections import deque
 from solar.common.utils import ensure_directory, NoAliasDumper
 from solar.einsum.analyzer import EinsumAnalyzer
 from solar.einsum.einsum_rank_renamer import EinsumRankRenamer
-from solar.einsum.ops.base import EinsumOp, EinsumOperand
+from solar.einsum.ops.base import EinsumOp, EinsumOperand, FFNOp, FFNOperand
 from solar.einsum.ops.registry import get_global_registry
 
 
@@ -514,7 +514,7 @@ class PyTorchToEinsum:
             start_id = "start" if idx == 0 else f"start_{idx}"
             original_id = info["original_id"]
             start_node_id_map[original_id] = start_id
-            
+
             # Build shapes dictionary
             shapes: Dict[str, List[int]] = {}
             output_shapes = info.get("output_shapes") or []
@@ -525,10 +525,12 @@ class PyTorchToEinsum:
             
             # Generate einsum equation
             equation = ""
+            operands = ""
             if output_shapes and len(output_shapes[0]) > 0:
                 dims = len(output_shapes[0])
                 labels = string.ascii_uppercase[:dims]
                 equation = f"->{labels}"
+                operands = {start_id: list(labels)}
             
             result["layers"][start_id] = {
                 "type": "start",
@@ -538,6 +540,7 @@ class PyTorchToEinsum:
                 "is_real_einsum": False,
                 "is_einsum_supportable": False,
                 "shapes": shapes,
+                "operands": operands,
                 "connections": {
                     "inputs": [],
                     "outputs": info.get("consumers", []),
@@ -580,13 +583,7 @@ class PyTorchToEinsum:
             reduction_op = einsum_op.reduction_op
             is_real_einsum = einsum_op.is_real_einsum
             is_einsum_supportable = einsum_op.is_einsum_supportable
-            operands = [
-                {
-                    "name": operand.name,
-                    "dims": operand.dims,
-                    "is_output": operand.is_output,
-                } for operand in einsum_op.operands
-            ]
+            operands = {operand.name: operand.dims for operand in einsum_op.operands}
 
         except Exception:
             equation = ""
@@ -726,37 +723,92 @@ class PyTorchToEinsum:
         einsum_graph: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Parse with topological order to build Fast Fusion graph."""
+        # Data structures for FFN graph
+        ffn_shapes = dict()
+        ffn_einsums = dict()
+        ffn_op_names = list() # ensure ordering
 
-        # Construct indegree map and a queue of zero-indegree nodes
+        # Topological sorting data structures:
+        # indegree map and a queue of zero-indegree nodes
+        init_nodes = set()
+        indegree = dict()
         queue = deque()
-        indegree = {}
         for node_name, node in einsum_graph["layers"].items():
             if len(node["connections"]["inputs"]) == 0:
+                init_nodes.add(node_name)
                 queue.append(node_name)
             else:
                 indegree[node_name] = len(node["connections"]["inputs"])
 
         # Topological traversal
         while queue:
-            current_node_name = queue.popleft()
-            current_node = einsum_graph["layers"][current_node_name]
+            node_name = queue.popleft()
+            node = einsum_graph["layers"][node_name]
 
-            # Process current node (placeholder for actual FFN logic)
-            from pprint import pprint
-            print(f"Processing node: {current_node_name}")
-            print(f"    einsum_equation: {current_node['einsum_equation']}")
-            if "operands" in current_node:
-                print(f"    operands: {current_node['operands']}")
+            # Process current node
+            if node_name in init_nodes:
+                input_dims = node['operands'][node_name]
+
+                input_operand = FFNOperand(name = node_name + "_in", dims_lowercase = input_dims)
+                output_operand = FFNOperand(name = node_name, dims_lowercase = input_dims, is_output=True)
+
+                op = FFNOp(name = node_name, is_copy_operation = True, tensor_accesses = [input_operand, output_operand])
+                ffn_op_names.append(node_name)
+                ffn_einsums[node_name] = op
+
+            else:
+                if len(node['connections']['inputs']) == 1:
+                    input_name = node['connections']['inputs'][0]
+                    input_dims = ffn_einsums[input_name].tensor_accesses[-1].dims_lowercase
+                    input_eq = node['operands']['Input']
+                    input_operand = FFNOperand(name = input_name, dims_lowercase = input_eq, dims_uppercase = input_dims)
+
+                    output_eq = node['operands']['Output']
+                    output_operand = FFNOperand(name = node_name, dims_lowercase = output_eq, is_output=True)
+
+                    op = FFNOp(name = node_name, tensor_accesses = [input_operand, output_operand])
+                    ffn_op_names.append(node_name)
+                    ffn_einsums[node_name] = op
+
+                elif len(node['connections']['inputs']) == 2:
+                    input1_name = node['connections']['inputs'][0]
+                    input1_dims = ffn_einsums[input1_name].tensor_accesses[-1].dims_lowercase
+                    input1_eq = node['operands']['Input']
+                    input1_operand = FFNOperand(name = input1_name, dims_lowercase = input1_eq, dims_uppercase = input1_dims)
+
+                    input2_name = node['connections']['inputs'][1]
+                    input2_dims = ffn_einsums[input2_name].tensor_accesses[-1].dims_lowercase
+                    input2_eq = node['operands']['Weight']
+                    input2_operand = FFNOperand(name = input2_name, dims_lowercase = input2_eq, dims_uppercase = input2_dims)
+
+                    output_eq = node['operands']['Output']
+                    output_operand = FFNOperand(name = node_name, dims_lowercase = output_eq, is_output=True)
+
+                    op = FFNOp(name = node_name, tensor_accesses = [input1_operand, input2_operand, output_operand])
+                    ffn_op_names.append(node_name)
+                    ffn_einsums[node_name] = op
+
+                else:
+                    raise ValueError(f"FFN graph builder only supports unary and binary ops. Inputs given: {node['connections']['inputs']}")
 
             # Decrease indegree of neighbors and add to queue if zero
-            for neighbor in current_node["connections"]["outputs"]:
+            for neighbor in node["connections"]["outputs"]:
                 if neighbor in indegree:
                     indegree[neighbor] -= 1
                     if indegree[neighbor] == 0:
                         queue.append(neighbor)
 
 
-        return einsum_graph
+        result = {
+            "workload": {
+                "version": "0.5",
+                "shape": ffn_shapes,
+                "einsums": [ffn_einsums[name].to_dict() for name in ffn_op_names],
+            }
+        }
+        for ein in result["workload"]["einsums"]:
+            print(ein)
+        return result
 
 
 

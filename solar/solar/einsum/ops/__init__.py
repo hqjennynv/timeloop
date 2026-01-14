@@ -9,7 +9,7 @@ from solar.einsum.ops.registry import (
     register_einsum_op,
     get_global_registry,
 )
-from solar.einsum.ops.base import EinsumOpHandler, EinsumOp, EinsumOperand
+from solar.einsum.ops.base import EinsumOpHandler, EinsumOp, EinsumOperand, FFNOperand, FFNOp
 
 __all__ = [
     "EinsumOpRegistry",
@@ -18,5 +18,7 @@ __all__ = [
     "EinsumOpHandler",
     "EinsumOp",
     "EinsumOperand",
+    "FFNOperand",
+    "FFNOp",
 ]
 
