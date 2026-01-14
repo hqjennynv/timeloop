@@ -752,6 +752,7 @@ class PyTorchToEinsum:
 
             # Process current node
             if node_name in init_nodes:
+                # Input tensors read from memory
                 input_dims = node['operands'][node_name]
 
                 input_operand = FFNOperand(name=node_name + "_in", dims_lowercase=input_dims)
@@ -764,17 +765,20 @@ class PyTorchToEinsum:
                     raise ValueError(f"FFN graph builder only supports unary and binary ops. Inputs given: {node['connections']['inputs']}")
 
                 operands = []
+                # Argument #1 in einsum operation
                 input_name = node['connections']['inputs'][0]
                 input_dims = ffn_einsums[input_name].tensor_accesses[-1].dims_lowercase
                 input_eq = node['operands']['Input']
                 operands.append(FFNOperand(name=input_name, dims_lowercase=input_eq, dims_uppercase=input_dims))
 
                 if len(node['connections']['inputs']) == 2:
+                    # Optional Argument #2 in einsum operation
                     input_name = node['connections']['inputs'][1]
                     input_dims = ffn_einsums[input_name].tensor_accesses[-1].dims_lowercase
                     input_eq = node['operands']['Weight']
                     operands.append(FFNOperand(name=input_name, dims_lowercase=input_eq, dims_uppercase=input_dims))
 
+                # Output of einsum operation
                 output_eq = node['operands']['Output']
                 operands.append(FFNOperand(name=node_name, dims_lowercase=output_eq, is_output=True))
 
