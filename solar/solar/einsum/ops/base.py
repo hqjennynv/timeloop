@@ -6,7 +6,8 @@ for all einsum operation handlers.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from operator import eq
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from solar.common.types import ShapeDict, TensorShape
 
@@ -185,6 +186,43 @@ class EinsumOpHandler(ABC):
         """Get output shape from shapes dict."""
         return shapes.get("Output") or shapes.get("output")
 
+@dataclass
+class FFNOperand:
+    """Represents an operand in Fast Fusion (FFN) einsum format."""
+    name: str
+    dims_lowercase: List[str]
+    dims_uppercase: Optional[List[str]] = None
+    is_output: bool = False
 
-__all__ = ["EinsumOperand", "EinsumOp", "EinsumOpHandler"]
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict to finally dump to FFN yaml."""
+        operand = dict()
+        operand['name'] = self.name
+        operand['projection'] = (
+            [d.lower() for d in self.dims_lowercase]
+            if self.dims_uppercase is None
+            else {d.upper(): pr.lower() for d, pr in zip(self.dims_uppercase, self.dims_lowercase)}
+        )
+        if self.is_output:
+            operand['output'] = True
+        return operand
+
+@dataclass
+class FFNOp:
+    """Represents an operation in Fast Fusion (FFN) einsum format."""
+    name: str
+    tensor_accesses: List[FFNOperand]
+    is_copy_operation: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict to finally dump to FFN yaml."""
+        op_dict = dict()
+        op_dict['name'] = self.name
+        if self.is_copy_operation:
+            op_dict['is_copy_operation'] = True
+        op_dict['tensor_accesses'] = [operand.to_dict() for operand in self.tensor_accesses]
+        return op_dict
+
+
+__all__ = ["EinsumOperand", "EinsumOp", "EinsumOpHandler", "FFNOperand", "FFNOp"]
 

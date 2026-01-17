@@ -22,7 +22,7 @@ from solar.einsum import (
 from solar.graph import PyTorchProcessor, TorchviewProcessor
 
 # Core types
-from solar.einsum.ops import EinsumOp, EinsumOperand
+from solar.einsum.ops import EinsumOp, EinsumOperand, FFNOp, FFNOperand
 
 __all__ = [
     # Einsum
@@ -36,4 +36,6 @@ __all__ = [
     # Types
     "EinsumOp",
     "EinsumOperand",
+    "FFNOp",
+    "FFNOperand",
 ]
