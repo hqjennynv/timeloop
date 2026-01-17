@@ -99,6 +99,13 @@ class TorchviewProcessor:
         self._matched_modules.clear()
         self._node_counter.clear()
         self._original_to_clean_id.clear()
+        # Reset module index tracker for hierarchical naming
+        self._module_index_tracker: Dict[Tuple[str, str], Dict[int, int]] = {}
+        self._module_has_duplicates: set = set()
+        self._names_repeated_in_any_path: set = set()
+        self._hierarchical_counter: Dict[str, int] = {}
+        # Mapping from original node id to hierarchical name
+        self._original_to_hierarchical: Dict[str, str] = {}
     
     def _extract_layer_nodes(self,
                            computation_graph: Any,
@@ -115,23 +122,29 @@ class TorchviewProcessor:
         # Try different extraction methods in order of preference
         layer_nodes = []
         
-        # Method 1: Extract from node hierarchy if available
-        if hasattr(computation_graph, 'node_hierarchy') and computation_graph.node_hierarchy:
-            if self._is_hierarchy_useful(computation_graph.node_hierarchy):
-                if self.debug:
-                    print("Extracting from node_hierarchy...")
-                return self._extract_from_hierarchy(
-                    computation_graph.node_hierarchy, 'Model'
-                )
-        
-        # Method 2: Extract from edge_list (most common path)
+        # Note: node_hierarchy contains hierarchical ModuleNode info (e.g., nn.Linear 
+        # with in_features/out_features), but the computation graph is extracted from 
+        # the flattened edge_list which contains FunctionNodes (e.g., F.linear).
+        # The hierarchy is useful for understanding module structure but edge_list
+        # provides the actual computation graph with tensor flow.
+        #
+        #  Extract from node hierarchy if available (hierarchical module info)
+        # if hasattr(computation_graph, 'node_hierarchy') and computation_graph.node_hierarchy:
+        #     if self._is_hierarchy_useful(computation_graph.node_hierarchy):
+        #         if self.debug:
+        #             print("Extracting from node_hierarchy...")
+        #         return self._extract_from_hierarchy(
+        #             computation_graph.node_hierarchy, 'Model'
+        #         )                
+
+        # Extract from edge_list (flattened computation graph)
         if hasattr(computation_graph, 'edge_list') and computation_graph.edge_list:
             if self.debug:
                 print(f"Extracting from edge_list ({len(computation_graph.edge_list)} edges)...")
             layer_nodes = self._extract_from_edge_list(computation_graph, original_model)
             return layer_nodes
         
-        # Method 3: Parse visual graph as fallback
+        # Parse visual graph as fallback
         if hasattr(computation_graph, 'visual_graph'):
             if self.debug:
                 print("Parsing visual graph...")
@@ -149,15 +162,23 @@ class TorchviewProcessor:
             True if hierarchy contains useful nodes, False otherwise.
         """
         for key, node in node_hierarchy.items():
-            node_class = type(node).__name__
+            node_class = type(key).__name__
             if node_class in ['TensorNode', 'ModuleNode', 'FunctionNode']:
                 return True
         return False
     
     def _extract_from_hierarchy(self,
-                              node_hierarchy: Dict[str, Any],
+                              node_hierarchy: Dict[Any, Any],
                               parent_name: str = '') -> List[NodeInfo]:
         """Recursively extract nodes from hierarchy.
+        
+        The hierarchy structure from torchview is:
+        {ModuleNode: [TensorNode, FunctionNode, {ChildModuleNode: [...]}, ...]}
+        
+        Keys are ModuleNode objects, values are lists containing:
+        - TensorNode objects (inputs/outputs/intermediates)
+        - FunctionNode objects (operations)
+        - Nested dicts for child modules
         
         Args:
             node_hierarchy: Node hierarchy dictionary.
@@ -168,25 +189,37 @@ class TorchviewProcessor:
         """
         layer_nodes = []
         
-        for node_name, node in node_hierarchy.items():
+        for module_node, children_list in node_hierarchy.items():
             try:
-                # Build hierarchical node ID
-                full_node_id = f"{parent_name}.{node_name}" if parent_name else node_name
+                # The key is the ModuleNode itself
+                module_name = getattr(module_node, 'name', str(module_node))
+                full_module_id = f"{parent_name}.{module_name}" if parent_name else module_name
                 
-                # Extract node information
-                node_info = self._extract_node_info(node, full_node_id)
+                # Extract the ModuleNode info
+                node_info = self._extract_node_info(module_node, full_module_id)
                 layer_nodes.append(node_info)
                 
-                # Recursively process children
-                if hasattr(node, 'children') and node.children:
-                    child_nodes = self._extract_from_hierarchy(
-                        node.children, full_node_id
-                    )
-                    layer_nodes.extend(child_nodes)
+                # Process the children list
+                if isinstance(children_list, list):
+                    for child in children_list:
+                        child_class = type(child).__name__
+                        
+                        if child_class == 'dict' or isinstance(child, dict):
+                            # Nested module hierarchy - recurse
+                            child_nodes = self._extract_from_hierarchy(
+                                child, full_module_id
+                            )
+                            layer_nodes.extend(child_nodes)
+                        elif child_class in ['TensorNode', 'FunctionNode']:
+                            # Extract tensor or function node
+                            child_name = getattr(child, 'name', str(child))
+                            child_id = f"{full_module_id}.{child_name}"
+                            child_info = self._extract_node_info(child, child_id)
+                            layer_nodes.append(child_info)
                     
             except Exception as e:
                 if self.debug:
-                    print(f"Warning: Could not extract node {node_name}: {e}")
+                    print(f"Warning: Could not extract module {module_node}: {e}")
                 continue
         
         return layer_nodes
@@ -361,6 +394,13 @@ class TorchviewProcessor:
             
             # Extract module arguments
             module_info['module_args'] = self._extract_module_arguments(module)
+        else:
+            # Fallback: parse the 'attributes' string from torchview
+            # Format: "Linear(training=False, in_features=64, out_features=64)"
+            if hasattr(node, 'attributes') and node.attributes:
+                parsed = self._parse_module_attributes_string(node.attributes)
+                if parsed:
+                    module_info['module_args'] = parsed
     
     def _get_pytorch_module(self, node: Any) -> Optional[nn.Module]:
         """Get the PyTorch module from a node object.
@@ -412,6 +452,67 @@ class TorchviewProcessor:
                 continue
         
         return args
+    
+    def _parse_module_attributes_string(self, attributes: str) -> Dict[str, Any]:
+        """Parse torchview ModuleNode attributes string.
+        
+        Format: "Linear(training=False, in_features=64, out_features=64)"
+        
+        Args:
+            attributes: Stringified module attributes from torchview.
+            
+        Returns:
+            Dictionary of parsed module arguments.
+        """
+        result: Dict[str, Any] = {}
+        
+        if not attributes:
+            return result
+        
+        # Extract module type from the beginning
+        # Format: "ModuleType(key=value, ...)"
+        import re
+        match = re.match(r'(\w+)\((.*)\)', attributes)
+        if not match:
+            return result
+        
+        module_type = match.group(1)
+        args_str = match.group(2)
+        
+        result['module_type'] = module_type
+        
+        # Parse key=value pairs
+        # Handle nested parentheses for tuples like kernel_size=(3, 3)
+        for kv_match in re.finditer(r'(\w+)=([^,]+(?:\([^)]*\))?)', args_str):
+            key = kv_match.group(1)
+            value_str = kv_match.group(2).strip()
+            
+            # Parse the value
+            try:
+                if value_str == 'True':
+                    result[key] = True
+                elif value_str == 'False':
+                    result[key] = False
+                elif value_str == 'None':
+                    result[key] = None
+                elif value_str.startswith('(') and value_str.endswith(')'):
+                    # Tuple like (3, 3)
+                    result[key] = eval(value_str)
+                elif '.' in value_str and not value_str.replace('.', '').replace('-', '').isdigit():
+                    # String with dots (like torch.float32)
+                    result[key] = value_str
+                elif value_str.replace('.', '').replace('-', '').isdigit():
+                    # Number
+                    if '.' in value_str:
+                        result[key] = float(value_str)
+                    else:
+                        result[key] = int(value_str)
+                else:
+                    result[key] = value_str
+            except Exception:
+                result[key] = value_str
+        
+        return result
     
     def _extract_function_node_info(self, node: Any, module_info: Dict[str, Any]) -> None:
         """Extract information from a FunctionNode.
@@ -685,34 +786,47 @@ class TorchviewProcessor:
         
         # Step 1: Collect all unique nodes from edges
         for i, edge in enumerate(computation_graph.edge_list):
-            if len(edge) >= 2:
-                source_node, target_node = edge[0], edge[1]
-                
-                # Add source node if it's a computation node
-                if self._is_computation_node(source_node):
-                    original_id = str(getattr(source_node, 'node_id', id(source_node)))
-                    if original_id not in computation_nodes:
-                        computation_nodes[original_id] = source_node
-                        node_order.append(original_id)
-                
-                # Add target node if it's a computation node
-                if self._is_computation_node(target_node):
-                    original_id = str(getattr(target_node, 'node_id', id(target_node)))
-                    if original_id not in computation_nodes:
-                        computation_nodes[original_id] = target_node
-                        node_order.append(original_id)
-        
+            if len(edge) < 2:
+                raise ValueError(
+                    f"Edge at index {i} has fewer than 2 nodes: {edge}. "
+                    f"Expected format: (source_node, target_node)."
+                )
+            if len(edge) > 2:
+                raise ValueError(
+                    f"Edge at index {i} has more than 2 nodes: {len(edge)} nodes found. "
+                    f"Expected exactly 2 nodes per edge: (source_node, target_node)."
+                )
+            
+            source_node, target_node = edge[0], edge[1]
+
+            # Add nodes to computation_nodes dict
+            for node in (source_node, target_node):
+                self._validate_node_type(node)
+                original_id = str(getattr(node, 'node_id', id(node)))
+                if original_id not in computation_nodes:
+                    computation_nodes[original_id] = node
+                    node_order.append(original_id)
+    
         if self.debug:
             print(f"  Found {len(computation_nodes)} unique computation nodes")
         
-        # Step 2: Generate clean IDs for all nodes and create NodeInfo objects
+        # Step 2: Pre-scan all nodes to discover which module names have duplicates
+        # This allows us to add indices consistently (Linear_0, Linear_1, Linear_2)
+        self._prescan_module_hierarchy(computation_nodes, node_order)
+        
+        # Step 3: Generate clean IDs and hierarchical names for all nodes
         result = []
         for original_id in node_order:
             node = computation_nodes[original_id]
             clean_id = self._generate_clean_id(node)
+            hierarchical_name = self._generate_hierarchical_name(node)
+            
             self._original_to_clean_id[original_id] = clean_id
+            self._original_to_hierarchical[original_id] = hierarchical_name
             
             node_info = self._extract_node_info(node, clean_id)
+            # Add hierarchical_name to module_args
+            node_info.module_args['hierarchical_name'] = hierarchical_name
             result.append(node_info)
         
         # Step 3: Build relationships from edge list using the ID mapping
@@ -753,39 +867,273 @@ class TorchviewProcessor:
         
         return result
     
-    def _is_computation_node(self, node: Any) -> bool:
-        """Check if a node is a computation node.
+    _VALID_NODE_TYPES = ('TensorNode', 'ModuleNode', 'FunctionNode')
+    
+    def _validate_node_type(self, node: Any) -> None:
+        """Validate that a node is one of the expected computation node types.
         
         Args:
-            node: Node object to check.
+            node: Node object to validate.
             
-        Returns:
-            True if it's a computation node, False otherwise.
+        Raises:
+            TypeError: If node is not one of the valid node types.
         """
-        if not hasattr(node, '__class__'):
-            return False
         node_class = type(node).__name__
-        return node_class in ['TensorNode', 'ModuleNode', 'FunctionNode']
+        if node_class not in self._VALID_NODE_TYPES:
+            raise TypeError(
+                f"Invalid node type: {node_class}. "
+                f"Expected one of {self._VALID_NODE_TYPES}."
+            )
+    
+    def _prescan_module_hierarchy(
+        self,
+        computation_nodes: Dict[str, Any],
+        node_order: List[str]
+    ) -> None:
+        """Pre-scan all nodes to discover which module names have duplicates.
+        
+        This allows consistent indexing where all instances of a duplicated
+        module name get indices (Linear_0, Linear_1, Linear_2) instead of
+        (Linear, Linear_1, Linear_2).
+        
+        Also tracks module names that appear multiple times in ANY hierarchy path,
+        so they get consistent indexing across all nodes.
+        
+        Args:
+            computation_nodes: Dict mapping original_id to node objects.
+            node_order: List of original_ids in discovery order.
+        """
+        # Temporary tracker to count unique instances at each level
+        temp_tracker: Dict[Tuple[str, str], set] = {}
+        
+        # Track module names that appear multiple times in any single hierarchy
+        # (e.g., EncoderLayer appears 3 times in EncoderLayer.EncoderLayer.EncoderLayer)
+        if not hasattr(self, '_names_repeated_in_any_path'):
+            self._names_repeated_in_any_path: set = set()
+        
+        for original_id in node_order:
+            node = computation_nodes[original_id]
+            hierarchy_with_ids = self._get_module_hierarchy_with_ids(node)
+            
+            # Check if any module name appears multiple times in this hierarchy
+            name_counts: Dict[str, int] = {}
+            for module_name, _ in hierarchy_with_ids:
+                name_counts[module_name] = name_counts.get(module_name, 0) + 1
+            
+            # Track names that repeat in any path
+            for name, count in name_counts.items():
+                if count > 1:
+                    self._names_repeated_in_any_path.add(name)
+            
+            parent_path = 'root'
+            for module_name, obj_id in hierarchy_with_ids:
+                key = (parent_path, module_name)
+                
+                if key not in temp_tracker:
+                    temp_tracker[key] = set()
+                
+                temp_tracker[key].add(obj_id)
+                
+                # Build parent_path for next level (use module_name without index for now)
+                parent_path = f"{parent_path}.{module_name}"
+        
+        # Mark keys that have duplicates (multiple different obj_ids at same level)
+        for key, obj_ids in temp_tracker.items():
+            if len(obj_ids) > 1:
+                self._module_has_duplicates.add(key)
     
     def _generate_clean_id(self, node: Any) -> str:
-        """Generate a clean node ID without memory addresses.
+        """Generate a flat node ID with Model prefix.
+        
+        Format: Model.<opname>_<count>
         
         Args:
             node: Node object.
             
         Returns:
-            Clean node ID string.
+            Flat node ID string.
         """
         node_name = getattr(node, 'name', type(node).__name__.lower())
         
-        if node_name not in self._node_counter:
-            self._node_counter[node_name] = 0
+        # Use flat naming: Model.<op_name>_<count>
+        op_key = f"Model.{node_name}"
+        if op_key not in self._node_counter:
+            self._node_counter[op_key] = 0
             count = 0
         else:
-            self._node_counter[node_name] += 1
-            count = self._node_counter[node_name]
+            self._node_counter[op_key] += 1
+            count = self._node_counter[op_key]
         
         return f"Model.{node_name}_{count}" if count > 0 else f"Model.{node_name}"
+    
+    def _generate_hierarchical_name(self, node: Any) -> str:
+        """Generate a hierarchical name showing the full module path.
+        
+        Format: Model.<level0name>_<idx>.<level1name>_<idx>.<opname>
+        
+        Args:
+            node: Node object.
+            
+        Returns:
+            Hierarchical name string.
+        """
+        node_name = getattr(node, 'name', type(node).__name__.lower())
+        
+        # Build hierarchical path from parent ModuleNodes (with their object IDs)
+        hierarchy_with_ids = self._get_module_hierarchy_with_ids(node)
+        
+        # Convert hierarchy to indexed names
+        indexed_hierarchy = self._index_hierarchy(hierarchy_with_ids)
+        
+        # Build full path: Model.<indexed_hierarchy>.<node_name>
+        if indexed_hierarchy:
+            base_path = 'Model.' + '.'.join(indexed_hierarchy)
+        else:
+            base_path = 'Model'
+        
+        # Add counter for the operation name uniqueness within this hierarchy
+        if not hasattr(self, '_hierarchical_counter'):
+            self._hierarchical_counter: Dict[str, int] = {}
+        
+        op_key = f"{base_path}.{node_name}"
+        if op_key not in self._hierarchical_counter:
+            self._hierarchical_counter[op_key] = 0
+            count = 0
+        else:
+            self._hierarchical_counter[op_key] += 1
+            count = self._hierarchical_counter[op_key]
+        
+        op_name_indexed = f"{node_name}_{count}" if count > 0 else node_name
+        return f"{base_path}.{op_name_indexed}"
+    
+    def _get_module_hierarchy_with_ids(self, node: Any, visited: Optional[set] = None) -> List[Tuple[str, int]]:
+        """Trace up parent chain to find ModuleNode hierarchy with object IDs.
+        
+        Args:
+            node: Node object.
+            visited: Set of visited node IDs to prevent cycles.
+            
+        Returns:
+            List of (module_name, object_id) tuples from root to immediate parent.
+        """
+        if visited is None:
+            visited = set()
+        
+        node_id = id(node)
+        if node_id in visited:
+            return []
+        visited.add(node_id)
+        
+        node_class = type(node).__name__
+        parents = list(getattr(node, 'parents', []))
+        
+        # Look for ModuleNode parent first
+        for parent in parents:
+            parent_class = type(parent).__name__
+            if parent_class == 'ModuleNode':
+                parent_name = getattr(parent, 'name', 'unknown')
+                parent_obj_id = id(parent)
+                # Recurse to get the ModuleNode's containment hierarchy
+                parent_hierarchy = self._get_module_hierarchy_with_ids(parent, visited)
+                return parent_hierarchy + [(parent_name, parent_obj_id)]
+        
+        # No direct ModuleNode parent - trace through TensorNode parents only
+        # (TensorNodes are part of module containment, FunctionNodes are data flow)
+        for parent in parents:
+            parent_class = type(parent).__name__
+            if parent_class == 'TensorNode':
+                # Continue tracing through TensorNode to find containing ModuleNode
+                parent_hierarchy = self._get_module_hierarchy_with_ids(parent, visited)
+                if parent_hierarchy:
+                    return parent_hierarchy
+        
+        # No module container found
+        return []
+    
+    def _index_hierarchy(self, hierarchy_with_ids: List[Tuple[str, int]]) -> List[str]:
+        """Convert hierarchy with IDs to indexed names.
+        
+        Tracks module names at each level and assigns indices when names repeat.
+        Always adds index suffix when there are duplicates at that level, OR when
+        the same module name appears multiple times in ANY hierarchy path.
+        
+        Args:
+            hierarchy_with_ids: List of (module_name, object_id) tuples.
+            
+        Returns:
+            List of indexed module names (e.g., ['MultiHeadAttention', 'Linear_0']).
+        """
+        if not hierarchy_with_ids:
+            return []
+        
+        # Track seen (parent_path, name) -> {obj_id: index}
+        # This allows us to assign consistent indices based on first-seen order
+        if not hasattr(self, '_module_index_tracker'):
+            self._module_index_tracker: Dict[Tuple[str, str], Dict[int, int]] = {}
+        
+        # Track which (parent_path, name) keys have duplicates
+        if not hasattr(self, '_module_has_duplicates'):
+            self._module_has_duplicates: set = set()
+        
+        # Track names that repeat in any path (set by prescan)
+        if not hasattr(self, '_names_repeated_in_any_path'):
+            self._names_repeated_in_any_path: set = set()
+        
+        result = []
+        parent_path = 'root'
+        
+        # Track indices for names that repeat across any hierarchy path
+        # This ensures consistent indexing even for nodes at different depths
+        path_name_indices: Dict[str, int] = {}
+        
+        for module_name, obj_id in hierarchy_with_ids:
+            key = (parent_path, module_name)
+            
+            if key not in self._module_index_tracker:
+                self._module_index_tracker[key] = {}
+            
+            tracker = self._module_index_tracker[key]
+            
+            if obj_id not in tracker:
+                # Assign next index for this module name at this level
+                tracker[obj_id] = len(tracker)
+                # If this is the second or later instance, mark as having duplicates
+                if len(tracker) > 1:
+                    self._module_has_duplicates.add(key)
+            
+            idx = tracker[obj_id]
+            
+            # Check if this name repeats in any hierarchy path (from prescan)
+            if module_name in self._names_repeated_in_any_path:
+                # Use path-local index for names that can repeat in hierarchies
+                if module_name not in path_name_indices:
+                    path_name_indices[module_name] = 0
+                else:
+                    path_name_indices[module_name] += 1
+                indexed_name = f"{module_name}_{path_name_indices[module_name]}"
+            elif key in self._module_has_duplicates:
+                # Use global index for duplicates at the same level
+                indexed_name = f"{module_name}_{idx}"
+            else:
+                indexed_name = module_name
+            
+            result.append(indexed_name)
+            parent_path = f"{parent_path}.{indexed_name}"
+        
+        return result
+    
+    def _get_module_hierarchy(self, node: Any, visited: Optional[set] = None) -> List[str]:
+        """Trace up parent chain to find ModuleNode hierarchy.
+        
+        Args:
+            node: Node object.
+            visited: Set of visited node IDs to prevent cycles.
+            
+        Returns:
+            List of module names from root to immediate parent.
+        """
+        hierarchy_with_ids = self._get_module_hierarchy_with_ids(node, visited)
+        return [name for name, _ in hierarchy_with_ids]
     
     def _extract_from_visual_graph(self, visual_graph: Any) -> List[NodeInfo]:
         """Extract nodes from the visual graph representation.
