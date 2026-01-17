@@ -6,7 +6,7 @@ This module defines constants following Google's Python style guide conventions.
 from typing import Dict, FrozenSet, List
 
 # Default settings
-DEFAULT_PRECISION = "fp32"
+DEFAULT_PRECISION = "fp16"
 DEFAULT_BATCH_SIZE = 5
 DEFAULT_TIMEOUT_SECONDS = 600
 DEFAULT_OUTPUT_DIR = "outputs"

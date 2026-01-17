@@ -223,11 +223,17 @@ def convert_numpy_types(obj: Any) -> Any:
         return obj
 
 
-def parse_dim_tokens(dims_str: str) -> List[str]:
+def parse_dim_tokens(dims_str: str, validate: bool = True) -> List[str]:
     """Parse a dimension string into individual dimension tokens.
     
-    Tokens are in the format: single capital letter optionally followed by digit(s).
-    Examples: A, B, A1, B1, A2, Z99, etc.
+    Tokens are in the format: SINGLE capital letter optionally followed by integer,
+    OR parenthesized groups like (P+R) for convolution-style notation.
+    Examples: A, B, A0, A1, A12, Z99, (P+R), (Q+S), etc.
+    
+    IMPORTANT: 
+    - Multi-letter prefixes are NOT allowed. Each token starts with exactly ONE letter.
+    - Repeated ranks in the same tensor are NOT allowed (raises ValueError).
+    - Parenthesized groups like (P+R) are preserved as single tokens.
     
     All tokens are returned in uppercase for consistency.
     
@@ -237,12 +243,19 @@ def parse_dim_tokens(dims_str: str) -> List[str]:
         "A1B2C3" -> ["A1", "B2", "C3"]
         "ABCA1B1" -> ["A", "B", "C", "A1", "B1"]
         "A12B34" -> ["A12", "B34"]
+        "BC(P+R)(Q+S)" -> ["B", "C", "(P+R)", "(Q+S)"]
+        "AA" -> raises ValueError (repeated rank "A")
+        "A0A0" -> raises ValueError (repeated rank "A0")
         
     Args:
-        dims_str: String of dimension names (e.g., "ABC", "A1B1C1", "A12B34")
+        dims_str: String of dimension names (e.g., "ABC", "A1B1C1", "A12B34", "BC(P+R)(Q+S)")
+        validate: If True, raise ValueError on repeated ranks. Default True.
         
     Returns:
         List of individual dimension tokens (uppercase)
+        
+    Raises:
+        ValueError: If validate=True and there are repeated ranks in the tensor.
     """
     if not dims_str:
         return []
@@ -250,12 +263,29 @@ def parse_dim_tokens(dims_str: str) -> List[str]:
     tokens = []
     i = 0
     while i < len(dims_str):
+        # Handle parenthesized groups like (P+R)
+        if dims_str[i] == '(':
+            # Find matching closing parenthesis
+            j = i + 1
+            depth = 1
+            while j < len(dims_str) and depth > 0:
+                if dims_str[j] == '(':
+                    depth += 1
+                elif dims_str[j] == ')':
+                    depth -= 1
+                j += 1
+            # Extract the group including parentheses, uppercase the content
+            group = dims_str[i:j].upper()
+            tokens.append(group)
+            i = j
+            continue
+        
         if not dims_str[i].isalpha():
             # Skip non-alphabetic characters
             i += 1
             continue
         
-        # Get the single letter
+        # Get the single letter (multi-letter prefixes NOT allowed)
         letter = dims_str[i].upper()
         i += 1
         
@@ -272,7 +302,60 @@ def parse_dim_tokens(dims_str: str) -> List[str]:
             # No digits following - just the single letter
             tokens.append(letter)
     
+    # Validate: no repeated ranks allowed in the same tensor
+    # For parenthesized groups, we check the whole group as a token
+    if validate and len(tokens) != len(set(tokens)):
+        seen = set()
+        duplicates = []
+        for token in tokens:
+            if token in seen:
+                duplicates.append(token)
+            seen.add(token)
+        raise ValueError(
+            f"Repeated rank(s) in tensor dimensions: {duplicates}. "
+            f"Each dimension must be unique. Got: {tokens}"
+        )
+    
     return tokens
+
+
+def validate_dim_tokens(tokens: List[str], raise_on_error: bool = False) -> bool:
+    """Validate that dimension tokens have no duplicates (repeated ranks).
+    
+    Each dimension in a tensor must be unique. Repeated ranks like ["A", "A"]
+    are semantically invalid.
+    
+    Args:
+        tokens: List of dimension tokens to validate.
+        raise_on_error: If True, raise ValueError on duplicates instead of returning False.
+        
+    Returns:
+        True if all tokens are unique, False if there are duplicates.
+        
+    Raises:
+        ValueError: If raise_on_error=True and there are duplicate tokens.
+        
+    Examples:
+        validate_dim_tokens(["A", "B", "C"]) -> True
+        validate_dim_tokens(["A", "A"]) -> False (repeated rank)
+        validate_dim_tokens(["A0", "A1", "B0"]) -> True
+    """
+    if len(tokens) == len(set(tokens)):
+        return True
+    
+    if raise_on_error:
+        seen = set()
+        duplicates = []
+        for token in tokens:
+            if token in seen:
+                duplicates.append(token)
+            seen.add(token)
+        raise ValueError(
+            f"Repeated rank(s) in tensor dimensions: {duplicates}. "
+            f"Each dimension must be unique. Got: {tokens}"
+        )
+    
+    return False
 
 
 def parse_einsum_equation(equation: str) -> tuple:
