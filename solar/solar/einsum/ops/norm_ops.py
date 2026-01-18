@@ -54,6 +54,7 @@ class NormalizationHandler(EinsumOpHandler):
         
         Normalization is approximated as elementwise for einsum analysis
         since the main computation is the affine transformation γx + β.
+        The elementwise_op is set to the norm type to indicate the actual operation.
         """
         dims = len(input_shape)
         labels = string.ascii_uppercase[:dims]
@@ -65,12 +66,15 @@ class NormalizationHandler(EinsumOpHandler):
         
         equation = f"{labels}->{labels}"
         
+        # Normalize op name (remove trailing underscore for inplace ops)
+        normalized_norm = norm_type.rstrip("_") 
+        
         return EinsumOp(
             operands=operands,
             equation=equation,
             name=norm_type,
             is_real_einsum=False,
-            elementwise_op="copy",
+            elementwise_op=normalized_norm,  # e.g., "batchnorm", "batchnorm2d", "layernorm"
             reduction_op="none",
         )
 

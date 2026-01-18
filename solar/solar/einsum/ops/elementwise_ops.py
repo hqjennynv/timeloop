@@ -21,10 +21,11 @@ class UnaryElementwiseHandler(EinsumOpHandler):
     """Handler for unary elementwise operations."""
     
     supported_ops = [
-        "relu", "sigmoid", "tanh", "gelu", "selu", "elu", "mish",
-        "softmax", "log_softmax", "softplus", "hardswish", "hardsigmoid",
-        "abs", "neg", "exp", "log", "sqrt", "rsqrt", "sin", "cos",
-        "clamp", "clamp_", "relu_",
+        "relu", "leaky_relu", "prelu", "rrelu",
+        "sigmoid", "tanh", "gelu", "selu", "elu", "celu", "mish", "silu",
+        "softmax", "log_softmax", "softplus", "softsign", "hardswish", "hardsigmoid", "hardtanh",
+        "abs", "neg", "exp", "log", "log2", "log10", "sqrt", "rsqrt", "sin", "cos", "tan",
+        "clamp", "clamp_", "relu_", "leaky_relu_",
         "dropout", "dropout_",
     ]
     
@@ -51,7 +52,7 @@ class UnaryElementwiseHandler(EinsumOpHandler):
         
         Args:
             shape: Input tensor shape.
-            op_type: Type of elementwise operation.
+            op_type: Type of elementwise operation (e.g., relu, sigmoid, tanh).
             
         Returns:
             EinsumOp for the elementwise operation.
@@ -66,12 +67,15 @@ class UnaryElementwiseHandler(EinsumOpHandler):
         
         equation = f"{labels}->{labels}"
         
+        # Normalize op name (remove trailing underscore for inplace ops)
+        normalized_op = op_type.rstrip("_")
+        
         return EinsumOp(
             operands=operands, 
             equation=equation, 
             name=op_type,
             is_real_einsum=False,
-            elementwise_op="copy",
+            elementwise_op=normalized_op,  # Use actual operation name
             reduction_op="none",
         )
 
@@ -98,8 +102,11 @@ class BinaryElementwiseHandler(EinsumOpHandler):
         if input_shape is None:
             raise ValueError(f"Missing Input shape for {op_name}")
         
-        # Get second input shape
-        input_1_shape = shapes.get("Input_1") or self._get_weight_shape(shapes)
+        # Get second input shape - try multiple keys
+        input_1_shape = (
+            shapes.get("Input_1") or 
+            shapes.get("Weight") 
+        )
         
         # Normalize op name (remove underscores and dunder)
         op_type = op_name.lower().rstrip("_")
@@ -109,12 +116,26 @@ class BinaryElementwiseHandler(EinsumOpHandler):
             op_type = op_type[1:]  # __radd__ -> add
         
         if input_1_shape is not None:
-            return self._generate_binary_elementwise_einsum(
+            einsum_op = self._generate_binary_elementwise_einsum(
                 input_shape, input_1_shape, op_type
             )
+            # Build tensor_shapes for validation
+            output_shape = self._get_output_shape(shapes)
+            tensor_shapes = {
+                "inputs": [list(input_shape), list(input_1_shape)],
+                "outputs": [list(output_shape)] if output_shape else []
+            }
+            # Validate and fix if needed
+            return self._validate_einsum(einsum_op, tensor_shapes)
         
         # Fallback to unary (scalar broadcast case)
-        return self._generate_unary_elementwise_einsum(input_shape, op_type)
+        einsum_op = self._generate_unary_elementwise_einsum(input_shape, op_type)
+        output_shape = self._get_output_shape(shapes)
+        tensor_shapes = {
+            "inputs": [list(input_shape)],
+            "outputs": [list(output_shape)] if output_shape else []
+        }
+        return self._validate_einsum(einsum_op, tensor_shapes)
     
     def _generate_binary_elementwise_einsum(
         self,
@@ -122,7 +143,12 @@ class BinaryElementwiseHandler(EinsumOpHandler):
         input_1_shape: TensorShape,
         op_type: str = "add"
     ) -> EinsumOp:
-        """Generate einsum for binary elementwise operations.
+        """Generate einsum for binary elementwise operations with broadcasting.
+        
+        Handles NumPy-style broadcasting where shapes are aligned from the right.
+        For example:
+            [32768, 32768] * [32768] -> [32768, 32768]
+            einsum: AB,B->AB (second input broadcasts along first dim)
         
         Args:
             input_shape: Shape of first input tensor.
@@ -138,7 +164,7 @@ class BinaryElementwiseHandler(EinsumOpHandler):
         # Handle broadcasting: compute output shape
         max_dims = max(len(input_shape), len(input_1_shape))
         
-        # Pad shorter shape with 1s at the front (broadcasting)
+        # Pad shorter shape with 1s at the front (broadcasting aligns from right)
         padded_input = [1] * (max_dims - len(input_shape)) + list(input_shape)
         padded_input_1 = [1] * (max_dims - len(input_1_shape)) + list(input_1_shape)
         
@@ -152,20 +178,20 @@ class BinaryElementwiseHandler(EinsumOpHandler):
                     f"Incompatible shapes for broadcasting: {input_shape} and {input_1_shape}"
                 )
         
-        # Generate dimension labels
-        labels = string.ascii_uppercase[:max_dims]
+        # Generate dimension labels for output (full rank)
+        output_labels = list(string.ascii_uppercase[:max_dims])
         
-        # Build dimension lists
-        input_dims = list(labels)
-        input_1_dims = list(labels)
-        output_dims = list(labels)
+        # Build dimension labels for each input based on actual rank
+        # Align from the right (broadcasting semantics)
+        input_labels = output_labels[-(len(input_shape)):] if input_shape else []
+        input_1_labels = output_labels[-(len(input_1_shape)):] if input_1_shape else []
         
-        equation = f"{''.join(input_dims)},{''.join(input_1_dims)}->{''.join(output_dims)}"
+        equation = f"{''.join(input_labels)},{''.join(input_1_labels)}->{''.join(output_labels)}"
         
         operands = [
-            EinsumOperand("Input", input_dims, is_output=False),
-            EinsumOperand("Input_1", input_1_dims, is_output=False),
-            EinsumOperand("Output", output_dims, is_output=True),
+            EinsumOperand("Input", input_labels, is_output=False),
+            EinsumOperand("Input_1", input_1_labels, is_output=False),
+            EinsumOperand("Output", output_labels, is_output=True),
         ]
         
         return EinsumOp(

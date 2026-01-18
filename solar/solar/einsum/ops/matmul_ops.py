@@ -49,6 +49,12 @@ class MatmulHandler(EinsumOpHandler):
     ) -> EinsumOp:
         """Generate einsum for matrix multiplication.
         
+        Handles broadcasting where inputs can have different batch dimensions.
+        PyTorch matmul broadcasting rules:
+        - [B, M, K] x [K, N] -> [B, M, N]  (2D weight broadcasts)
+        - [M, K] x [B, K, N] -> [B, M, N]  (2D input broadcasts)
+        - [B, M, K] x [B, K, N] -> [B, M, N]  (same batch dims)
+        
         Args:
             input_shape: Shape of first input tensor.
             other_shape: Shape of second input tensor.
@@ -56,22 +62,64 @@ class MatmulHandler(EinsumOpHandler):
         Returns:
             EinsumOp for the matmul operation.
         """
-        # Handle different matmul cases
-        if len(input_shape) == 2 and len(other_shape) == 2:
-            # Standard 2D matmul
+        # Handle different matmul cases based on actual tensor shapes
+        input_ndim = len(input_shape)
+        other_ndim = len(other_shape)
+        
+        if input_ndim == 2 and other_ndim == 2:
+            # Standard 2D matmul: [M, K] x [K, N] -> [M, N]
             operands = [
                 EinsumOperand("Input", ["M", "K"], is_output=False),
                 EinsumOperand("Weight", ["K", "N"], is_output=False),
                 EinsumOperand("Output", ["M", "N"], is_output=True),
             ]
             equation = "MK,KN->MN"
-        else:
-            # Batched matmul
-            batch_dims = max(len(input_shape), len(other_shape)) - 2
+        elif input_ndim > 2 and other_ndim == 2:
+            # Batched input with 2D weight: [B0, ..., M, K] x [K, N] -> [B0, ..., M, N]
+            batch_dims = input_ndim - 2
             batch_letters = [f"B{i}" for i in range(batch_dims)]
             dims_a = batch_letters + ["M", "K"]
+            dims_b = ["K", "N"]  # No batch dims for weight
+            dims_out = batch_letters + ["M", "N"]
+            
+            operands = [
+                EinsumOperand("Input", dims_a, is_output=False),
+                EinsumOperand("Weight", dims_b, is_output=False),
+                EinsumOperand("Output", dims_out, is_output=True),
+            ]
+            equation = f"{''.join(dims_a)},{''.join(dims_b)}->{''.join(dims_out)}"
+        elif input_ndim == 2 and other_ndim > 2:
+            # 2D input with batched weight: [M, K] x [B0, ..., K, N] -> [B0, ..., M, N]
+            batch_dims = other_ndim - 2
+            batch_letters = [f"B{i}" for i in range(batch_dims)]
+            dims_a = ["M", "K"]  # No batch dims for input
             dims_b = batch_letters + ["K", "N"]
             dims_out = batch_letters + ["M", "N"]
+            
+            operands = [
+                EinsumOperand("Input", dims_a, is_output=False),
+                EinsumOperand("Weight", dims_b, is_output=False),
+                EinsumOperand("Output", dims_out, is_output=True),
+            ]
+            equation = f"{''.join(dims_a)},{''.join(dims_b)}->{''.join(dims_out)}"
+        else:
+            # Both have batch dimensions - use the actual batch dims from each tensor
+            input_batch_dims = input_ndim - 2
+            other_batch_dims = other_ndim - 2
+            output_batch_dims = max(input_batch_dims, other_batch_dims)
+            
+            # Generate batch letters for output (max of both)
+            output_batch_letters = [f"B{i}" for i in range(output_batch_dims)]
+            
+            # Input batch dims (may be fewer than output)
+            input_batch_letters = output_batch_letters[-input_batch_dims:] if input_batch_dims > 0 else []
+            dims_a = input_batch_letters + ["M", "K"]
+            
+            # Other batch dims (may be fewer than output)
+            other_batch_letters = output_batch_letters[-other_batch_dims:] if other_batch_dims > 0 else []
+            dims_b = other_batch_letters + ["K", "N"]
+            
+            dims_out = output_batch_letters + ["M", "N"]
             
             operands = [
                 EinsumOperand("Input", dims_a, is_output=False),

@@ -8,8 +8,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from operator import eq
 from typing import Any, Dict, List, Optional, Tuple, Union
+import logging
 
 from solar.common.types import ShapeDict, TensorShape
+from solar.common.utils import validate_einsum_ranks_match_shapes
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -185,6 +189,123 @@ class EinsumOpHandler(ABC):
     def _get_output_shape(self, shapes: ShapeDict) -> Optional[TensorShape]:
         """Get output shape from shapes dict."""
         return shapes.get("Output") or shapes.get("output")
+    
+    def _validate_einsum(
+        self, 
+        einsum_op: "EinsumOp", 
+        tensor_shapes: Dict[str, List[List[int]]]
+    ) -> "EinsumOp":
+        """Validate that einsum ranks match tensor shapes.
+        
+        If validation fails, logs a warning and attempts to fix the equation
+        by regenerating it based on actual shapes.
+        
+        Args:
+            einsum_op: The generated EinsumOp to validate.
+            tensor_shapes: Dictionary with "inputs" and "outputs" keys containing shape lists.
+                          Format: {"inputs": [[shape1], [shape2]], "outputs": [[output_shape]]}
+            
+        Returns:
+            The validated (and possibly corrected) EinsumOp.
+        """
+        is_valid, error_msg = validate_einsum_ranks_match_shapes(
+            einsum_op.equation, tensor_shapes
+        )
+        
+        if not is_valid:
+            logger.warning(
+                f"Einsum rank mismatch for {einsum_op.name}: {error_msg}. "
+                f"Equation: {einsum_op.equation}, tensor_shapes: {tensor_shapes}"
+            )
+            # Try to fix by regenerating equation from shapes
+            corrected_op = self._try_fix_einsum_ranks(einsum_op, tensor_shapes)
+            if corrected_op is not None:
+                return corrected_op
+        
+        return einsum_op
+    
+    def _try_fix_einsum_ranks(
+        self, 
+        einsum_op: "EinsumOp", 
+        tensor_shapes: Dict[str, List[List[int]]]
+    ) -> Optional["EinsumOp"]:
+        """Attempt to fix einsum equation to match actual tensor shapes.
+        
+        This is a best-effort fix that regenerates the equation based on
+        actual tensor ranks.
+        
+        Args:
+            einsum_op: The EinsumOp with mismatched ranks.
+            tensor_shapes: Dictionary with "inputs" and "outputs" keys containing shape lists.
+            
+        Returns:
+            Corrected EinsumOp if fix was possible, None otherwise.
+        """
+        import string
+        
+        # Get actual shapes from tensor_shapes
+        input_shapes = tensor_shapes.get("inputs", [])
+        output_shapes = tensor_shapes.get("outputs", [])
+        
+        if not input_shapes or not output_shapes:
+            return None
+        
+        input_shape = input_shapes[0] if input_shapes else None
+        input_1_shape = input_shapes[1] if len(input_shapes) > 1 else None
+        output_shape = output_shapes[0] if output_shapes else None
+        
+        if input_shape is None or output_shape is None:
+            return None
+        
+        input_rank = len(input_shape)
+        output_rank = len(output_shape)
+        
+        # Generate labels based on actual ranks
+        input_labels = string.ascii_uppercase[:input_rank]
+        output_labels = string.ascii_uppercase[:output_rank]
+        
+        # For binary ops, handle second input
+        if input_1_shape is not None:
+            input_1_rank = len(input_1_shape)
+            
+            # Handle broadcasting: use output labels for the larger tensor
+            if input_1_rank < input_rank:
+                # Second input is smaller, use suffix of output labels (broadcast from right)
+                input_1_labels = output_labels[-input_1_rank:] if input_1_rank > 0 else ""
+            elif input_1_rank > input_rank:
+                # First input is smaller, use suffix of output labels
+                input_labels = output_labels[-input_rank:] if input_rank > 0 else ""
+                input_1_labels = output_labels
+            else:
+                input_1_labels = input_labels
+            
+            new_equation = f"{input_labels},{input_1_labels}->{output_labels}"
+            
+            # Update operands
+            new_operands = [
+                EinsumOperand("Input", list(input_labels), is_output=False),
+                EinsumOperand("Input_1", list(input_1_labels), is_output=False),
+                EinsumOperand("Output", list(output_labels), is_output=True),
+            ]
+        else:
+            new_equation = f"{input_labels}->{output_labels}"
+            new_operands = [
+                EinsumOperand("Input", list(input_labels), is_output=False),
+                EinsumOperand("Output", list(output_labels), is_output=True),
+            ]
+        
+        logger.info(f"Fixed einsum equation: {einsum_op.equation} -> {new_equation}")
+        
+        return EinsumOp(
+            operands=new_operands,
+            equation=new_equation,
+            name=einsum_op.name,
+            is_real_einsum=einsum_op.is_real_einsum,
+            elementwise_op=einsum_op.elementwise_op,
+            reduction_op=einsum_op.reduction_op,
+            is_einsum_supportable=einsum_op.is_einsum_supportable,
+        )
+
 
 @dataclass
 class FFNOperand:

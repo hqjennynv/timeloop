@@ -7,7 +7,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -397,6 +397,135 @@ def parse_einsum_equation(equation: str) -> tuple:
                 input_operands.append(parse_dim_tokens(operand_str))
     
     return input_operands, output_tokens
+
+
+def validate_einsum_ranks_match_shapes(
+    equation: str,
+    tensor_shapes: Dict[str, List[List[int]]],
+) -> Tuple[bool, str]:
+    """Validate that einsum equation ranks match tensor shapes.
+    
+    This function checks that the number of dimensions in each operand of the
+    einsum equation matches the corresponding tensor shape.
+    
+    Args:
+        equation: Einsum equation string (e.g., "AB,BC->AC")
+        tensor_shapes: Dictionary with "inputs" and "outputs" keys, each containing
+                      a list of shapes. Format: {"inputs": [[32, 64], [64, 128]], "outputs": [[32, 128]]}
+    
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+        
+    Examples:
+        >>> validate_einsum_ranks_match_shapes("AB,BC->AC", {"inputs": [[32, 64], [64, 128]], "outputs": [[32, 128]]})
+        (True, "")
+        >>> validate_einsum_ranks_match_shapes("AB,AB->AB", {"inputs": [[32, 64], [64]], "outputs": [[32, 64]]})
+        (False, "Einsum input operand 1 has 2 dims (AB) but tensor has shape [64] (1 dims)")
+    """
+    if not equation or "->" not in equation:
+        return True, ""  # Can't validate without proper equation
+    
+    input_operands, output_tokens = parse_einsum_equation(equation)
+    
+    # Get input and output shapes from tensor_shapes
+    input_shapes = tensor_shapes.get("inputs", [])
+    output_shapes = tensor_shapes.get("outputs", [])
+    
+    errors = []
+    
+    # Validate input operands
+    for i, operand_tokens in enumerate(input_operands):
+        if i >= len(input_shapes):
+            continue  # Skip if shape not available
+        
+        shape = input_shapes[i]
+        if shape is None:
+            continue
+        
+        expected_rank = len(operand_tokens)
+        actual_rank = len(shape)
+        
+        if expected_rank != actual_rank:
+            operand_str = "".join(operand_tokens)
+            errors.append(
+                f"Einsum input operand {i} has {expected_rank} dims ({operand_str}) "
+                f"but tensor has shape {shape} ({actual_rank} dims)"
+            )
+    
+    # Validate output operand
+    if output_tokens and output_shapes:
+        output_shape = output_shapes[0] if output_shapes else None
+        if output_shape is not None:
+            expected_rank = len(output_tokens)
+            actual_rank = len(output_shape)
+            
+            if expected_rank != actual_rank:
+                output_str = "".join(output_tokens)
+                errors.append(
+                    f"Einsum output has {expected_rank} dims ({output_str}) "
+                    f"but tensor has shape {output_shape} ({actual_rank} dims)"
+                )
+    
+    if errors:
+        return False, "; ".join(errors)
+    return True, ""
+
+
+def validate_tensor_names_match_shapes(
+    tensor_names: Dict[str, List[str]],
+    tensor_shapes: Dict[str, List[List[int]]],
+) -> Tuple[bool, str]:
+    """Validate that tensor_names and tensor_shapes have matching counts.
+    
+    This function checks that the number of tensor names matches the number of
+    tensor shapes for both inputs and outputs.
+    
+    Args:
+        tensor_names: Dictionary with "inputs" and "outputs" keys, each containing
+                     a list of tensor names. Format: {"inputs": ["A", "B"], "outputs": ["C"]}
+        tensor_shapes: Dictionary with "inputs" and "outputs" keys, each containing
+                      a list of shapes. Format: {"inputs": [[32, 64], [64, 128]], "outputs": [[32, 128]]}
+    
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+        
+    Examples:
+        >>> validate_tensor_names_match_shapes(
+        ...     {"inputs": ["A", "B"], "outputs": ["C"]},
+        ...     {"inputs": [[32, 64], [64, 128]], "outputs": [[32, 128]]}
+        ... )
+        (True, "")
+        >>> validate_tensor_names_match_shapes(
+        ...     {"inputs": ["A", "B"], "outputs": ["C"]},
+        ...     {"inputs": [[32, 64]], "outputs": [[32, 128]]}
+        ... )
+        (False, "Input tensor_names has 2 entries but tensor_shapes has 1")
+    """
+    errors = []
+    
+    # Validate inputs
+    input_names = tensor_names.get("inputs", [])
+    input_shapes = tensor_shapes.get("inputs", [])
+    
+    if len(input_names) != len(input_shapes):
+        errors.append(
+            f"Input tensor_names has {len(input_names)} entries "
+            f"but tensor_shapes has {len(input_shapes)}"
+        )
+    
+    # Validate outputs
+    output_names = tensor_names.get("outputs", [])
+    output_shapes = tensor_shapes.get("outputs", [])
+    
+    if len(output_names) != len(output_shapes):
+        errors.append(
+            f"Output tensor_names has {len(output_names)} entries "
+            f"but tensor_shapes has {len(output_shapes)}"
+        )
+    
+    if errors:
+        return False, "; ".join(errors)
+    return True, ""
 
 
 def load_einsum_graph_to_networkx(layers: Dict[str, Any]) -> Any:
