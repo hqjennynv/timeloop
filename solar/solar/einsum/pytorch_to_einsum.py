@@ -761,10 +761,19 @@ class PyTorchToEinsum:
         ffn_shapes = dict()
         ffn_einsums = dict()
         ffn_op_names = list() # ensure ordering
+
         def _add_op(name: str, tensor_accesses: List[FFNOperand], is_copy_operation: bool = False):
             op = FFNOp(name=name, tensor_accesses=tensor_accesses, is_copy_operation=is_copy_operation)
             ffn_op_names.append(name)
             ffn_einsums[name] = op
+
+        def _add_shapes(names: List[str], shapes: List[int]):
+            for name, shape in zip(names, shapes):
+                name = name.lower()
+                if name in ffn_shapes:
+                    assert ffn_shapes[name] == shape, f"Conflicting shapes for {name}: {ffn_shapes[name]} vs {shape}"
+                    return
+                ffn_shapes[name] = shape
 
         # Topological sorting data structures:
         # indegree map and a queue of zero-indegree nodes
@@ -787,10 +796,12 @@ class PyTorchToEinsum:
             if node_name in init_nodes:
                 # Input tensors read from memory
                 input_dims = node['operands'][node_name]
+                shapes = node['shapes']['Output']
 
                 input_operand = FFNOperand(name=node_name + "_in", dims_lowercase=input_dims)
                 output_operand = FFNOperand(name=node_name, dims_lowercase=input_dims, is_output=True)
 
+                _add_shapes(input_dims, shapes)
                 _add_op(name=node_name, tensor_accesses=[input_operand, output_operand], is_copy_operation=True)
 
             else:
@@ -812,9 +823,11 @@ class PyTorchToEinsum:
                     operands.append(FFNOperand(name=input_name, dims_lowercase=input_eq, dims_uppercase=input_dims))
 
                 # Output of einsum operation
-                output_eq = node['operands']['Output']
-                operands.append(FFNOperand(name=node_name, dims_lowercase=output_eq, is_output=True))
+                output_dims = node['operands']['Output']
+                output_shapes = node['shapes']['Output']
+                operands.append(FFNOperand(name=node_name, dims_lowercase=output_dims, is_output=True))
 
+                _add_shapes(output_dims, output_shapes)
                 _add_op(name=node_name, tensor_accesses=operands)
 
             # Decrease indegree of neighbors and add to queue if zero
@@ -827,7 +840,7 @@ class PyTorchToEinsum:
         result = {
             "workload": {
                 "version": "0.5",
-                "shape": ffn_shapes,
+                "shape": {k: f"0 <= {k} < {v}" for k, v in ffn_shapes.items()},
                 "einsums": [ffn_einsums[name].to_dict() for name in ffn_op_names],
             }
         }
