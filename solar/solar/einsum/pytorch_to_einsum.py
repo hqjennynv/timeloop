@@ -274,12 +274,6 @@ class PyTorchToEinsum:
         # Write ffn_einsum_graph.yaml
         out_path = out_dir / "ffn_einsum_graph.yaml"
         with open(out_path, "w") as f:
-            # yaml.dump(
-            #     ffn_graph, f,
-            #     Dumper=NoAliasDumper,
-            #     sort_keys=False,
-            #     default_flow_style=True
-            # )
             yaml.dump(
                 flowify(ffn_graph), f,
                 Dumper=LocalDumper,
