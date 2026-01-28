@@ -257,7 +257,6 @@ class PyTorchToEinsum:
         einsum_graph = self._build_einsum_graph(
             pytorch_graph, op_graph, start_nodes_info
         )
-
         # Write einsum_graph.yaml
         out_path = out_dir / "einsum_graph.yaml"
         with open(out_path, "w") as f:
@@ -268,9 +267,18 @@ class PyTorchToEinsum:
                 default_flow_style=False
             )
 
-        # Build FFN graph dictionary
-        ffn_graph = self._build_ffn_graph(einsum_graph)
+        einsum_graph_renamed = self._build_einsum_graph_renamed(einsum_graph)
+        out_path = out_dir / "einsum_graph_renamed.yaml"
+        with open(out_path, "w") as f:
+            yaml.dump(
+                einsum_graph_renamed, f,
+                Dumper=NoAliasDumper,
+                sort_keys=False,
+                default_flow_style=False
+            )
 
+        # Build FFN graph dictionary
+        ffn_graph = self._build_ffn_graph(einsum_graph_renamed)
         # Write ffn_einsum_graph.yaml
         out_path = out_dir / "ffn_einsum_graph.yaml"
         with open(out_path, "w") as f:
@@ -750,6 +758,21 @@ class PyTorchToEinsum:
         
         # Default: supportable unless explicitly unsupportable
         return op not in _UNSUPPORTABLE_OPS
+
+    def _build_einsum_graph_renamed(
+        self,
+        einsum_graph: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Parse with topological order to build Fast Fusion graph."""
+
+        # Assign unique rank names to start nodes
+
+        # Parse graph in topological order and rename ranks.
+        # - Output node maintains input (1st operand) rank names, always.
+        # - Output node maintains weight (2nd operand) rank names if possible.
+
+
+        return einsum_graph  # Placeholder for actual renaming logic
 
     def _build_ffn_graph(
         self,
