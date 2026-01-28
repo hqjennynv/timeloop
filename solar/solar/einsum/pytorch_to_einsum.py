@@ -563,16 +563,16 @@ class PyTorchToEinsum:
                 shapes["Output"] = list(output_shapes[0])
                 for i, shape in enumerate(output_shapes[1:], start=1):
                     shapes[f"Output_{i}"] = list(shape)
-            
+
             # Generate einsum equation
             equation = ""
             operands = ""
             if output_shapes and len(output_shapes[0]) > 0:
                 dims = len(output_shapes[0])
-                labels = string.ascii_uppercase[:dims]
-                equation = f"->{labels}"
-                operands = {start_id: list(labels)}
-            
+                labels = [f"{c}{idx}" for c in string.ascii_uppercase[:dims]]
+                equation = f"->{''.join(labels)}"
+                operands = {start_id: labels}
+
             result["layers"][start_id] = {
                 "type": "start",
                 "einsum_equation": equation,
@@ -587,7 +587,7 @@ class PyTorchToEinsum:
                     "outputs": info.get("consumers", []),
                 },
             }
-            
+
         return start_node_id_map
 
     def _convert_operation(
@@ -764,8 +764,6 @@ class PyTorchToEinsum:
         einsum_graph: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Parse with topological order to build Fast Fusion graph."""
-
-        # Assign unique rank names to start nodes
 
         # Parse graph in topological order and rename ranks.
         # - Output node maintains input (1st operand) rank names, always.
