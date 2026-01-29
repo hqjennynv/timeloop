@@ -849,10 +849,10 @@ class PyTorchToEinsum:
         def _add_shapes(names: List[str], shapes: List[int]):
             for name, shape in zip(names, shapes):
                 name = name.lower()
-                if name in ffn_shapes:
+                if name not in ffn_shapes:
+                    ffn_shapes[name] = shape
+                else:
                     assert ffn_shapes[name] == shape, f"Conflicting shapes for {name}: {ffn_shapes[name]} vs {shape}"
-                    return
-                ffn_shapes[name] = shape
 
         # Topological sort data structures:
         # indegree map and a queue of zero-indegree nodes
