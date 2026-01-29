@@ -293,14 +293,6 @@ class PyTorchToEinsum:
         if self._debug:
             print(f"✅ Wrote einsum graph: {out_path}")
 
-        # Rename ranks using BFS traversal
-        renamer = EinsumRankRenamer(debug=self._debug)
-        renamed_path = out_dir / "einsum_graph_renamed.yaml"
-        renamer.rename(einsum_graph, renamed_path)
-
-        if self._debug:
-            print(f"✅ Wrote renamed einsum graph: {renamed_path}")
-
         return einsum_graph
 
     # Backward compatibility alias
@@ -862,7 +854,7 @@ class PyTorchToEinsum:
                     return
                 ffn_shapes[name] = shape
 
-        # Topological sorting data structures:
+        # Topological sort data structures:
         # indegree map and a queue of zero-indegree nodes
         init_nodes = set()
         indegree = dict()
@@ -904,10 +896,10 @@ class PyTorchToEinsum:
 
                 if len(node['connections']['inputs']) == 2:
                     # Optional Argument #2 in einsum operation
-                    input_name = node['connections']['inputs'][1]
-                    input_dims = ffn_einsums[input_name].tensor_accesses[-1].dims_lowercase
-                    input_eq = node['operands']['Weight']
-                    operands.append(FFNOperand(name=input_name, dims_lowercase=input_eq, dims_uppercase=input_dims))
+                    weight_name = node['connections']['inputs'][1]
+                    weight_dims = ffn_einsums[weight_name].tensor_accesses[-1].dims_lowercase
+                    weight_eq = node['operands']['Weight']
+                    operands.append(FFNOperand(name=weight_name, dims_lowercase=weight_eq, dims_uppercase=weight_dims))
 
                 # Output of einsum operation
                 output_dims = node['operands']['Output']
