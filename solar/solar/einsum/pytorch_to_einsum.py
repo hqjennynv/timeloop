@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import networkx as nx
 import yaml
+import copy
 from collections import deque
 
 from solar.common.utils import ensure_directory, NoAliasDumper
@@ -764,13 +765,78 @@ class PyTorchToEinsum:
         einsum_graph: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Parse with topological order to build Fast Fusion graph."""
+        einsum_graph_renamed = copy.deepcopy(einsum_graph)
 
-        # Parse graph in topological order and rename ranks.
-        # - Output node maintains input (1st operand) rank names, always.
-        # - Output node maintains weight (2nd operand) rank names if possible.
+        # Topological sort data structures:
+        # indegree map and a queue of zero-indegree nodes
+        init_nodes = set()
+        indegree = dict()
+        queue = deque()
+        for node_name, node in einsum_graph_renamed["layers"].items():
+            if len(node["connections"]["inputs"]) == 0:
+                init_nodes.add(node_name)
+                queue.append(node_name)
+            else:
+                indegree[node_name] = len(node["connections"]["inputs"])
+        # Counter to help generating unique rank names
+        node_cnt = len(init_nodes)
 
+        # Topological traversal
+        while queue:
+            node_name = queue.popleft()
+            node = einsum_graph_renamed["layers"][node_name]
 
-        return einsum_graph  # Placeholder for actual renaming logic
+            # Process current node
+            if node_name not in init_nodes:
+                mapping = dict()
+
+                # Maintains Input (1st operand) rank names, always.
+                input_name = node['connections']['inputs'][0]
+                input_operand_id = input_name if input_name in init_nodes else 'Output'
+                input_dims = einsum_graph_renamed["layers"][input_name]['operands'][input_operand_id]
+                input_dims_cur = node['operands']['Input']
+                for dim_icur, dim_i in zip(input_dims_cur, input_dims):
+                    mapping[dim_icur] = dim_i
+
+                # Maintains Weight (2nd operand) rank names when possible.
+                # If renaming is needed, add a new rank name.
+                if len(node['connections']['inputs']) == 2:
+                    weight_name = node['connections']['inputs'][1]
+                    weight_operand_id = weight_name if weight_name in init_nodes else 'Output'
+                    weight_dims = einsum_graph_renamed["layers"][weight_name]['operands'][weight_operand_id]
+                    weight_dims_cur = node['operands']['Weight']
+                    for dim_wcur, dim_w in zip(weight_dims_cur, weight_dims):
+                        if dim_wcur not in mapping:
+                            if dim_w not in mapping.values():
+                                mapping[dim_wcur] = dim_w
+                            else:
+                                # Generate a new rank name
+                                mapping[dim_wcur] = f"{dim_w}{node_cnt}"
+                        # No else condition to prioritize Input rank names
+
+                # Rename operands based on mapping
+                einsum_graph_renamed["layers"][node_name]['operands']['Input'] = [mapping[dim] for dim in node['operands']['Input']]
+                if len(node['connections']['inputs']) == 2:
+                    einsum_graph_renamed["layers"][node_name]['operands']['Weight'] = [mapping[dim] for dim in node['operands']['Weight']]
+                einsum_graph_renamed["layers"][node_name]['operands']['Output'] = [mapping[dim] for dim in node['operands']['Output']]
+
+                # Update einsum equation
+                eq = ""
+                eq += ''.join(einsum_graph_renamed["layers"][node_name]['operands']['Input'])
+                if len(node['connections']['inputs']) == 2:
+                    eq += ',' + ''.join(einsum_graph_renamed["layers"][node_name]['operands']['Weight'])
+                eq += '->' + ''.join(einsum_graph_renamed["layers"][node_name]['operands']['Output'])
+                einsum_graph_renamed["layers"][node_name]['einsum_equation'] = eq
+
+            # Decrease indegree of neighbors and add to queue if zero
+            for neighbor in node["connections"]["outputs"]:
+                if neighbor in indegree:
+                    indegree[neighbor] -= 1
+                    if indegree[neighbor] == 0:
+                        queue.append(neighbor)
+            node_cnt += 1
+
+        return einsum_graph_renamed
 
     def _build_ffn_graph(
         self,
